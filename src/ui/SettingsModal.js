@@ -1,0 +1,5 @@
+export class SettingsModal {
+  constructor(onChange){this.onChange=onChange;this.state={density:.42,season:'Summer',time:'Day',volume:40};document.querySelector('#settings-toggle').addEventListener('click',()=>this.open());document.querySelector('#modal-close').addEventListener('click',()=>this.close());document.querySelector('#modal-backdrop').addEventListener('click',e=>{if(e.target.id==='modal-backdrop')this.close()});document.querySelectorAll('[data-setting]').forEach(el=>el.addEventListener('input',()=>{const key=el.dataset.setting;this.state[key]=el.type==='range'?Number(el.value):el.value;const out=document.querySelector(`#${key}-out`);if(out)out.textContent=el.type==='range'?`${Math.round(Number(el.value)*100)}%`:el.value;this.onChange(this.state)}));document.addEventListener('keydown',e=>{if(e.key==='Escape')this.close()})}
+  open(){document.querySelector('#modal-backdrop').classList.add('open');document.querySelector('#modal-backdrop').setAttribute('aria-hidden','false')}
+  close(){document.querySelector('#modal-backdrop').classList.remove('open');document.querySelector('#modal-backdrop').setAttribute('aria-hidden','true')}
+}
