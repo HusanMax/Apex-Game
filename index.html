@@ -1,14 +1,198 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#111817" />
-    <meta name="description" content="Apex Drive — an endless highway driving simulator." />
-    <title>Apex Drive — Open Road Simulator</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Midnight Tuner — Street Racing</title>
+  <style>
+    :root {
+      --accent: #19ff8a;
+      --accent-2: #00e5ff;
+      --accent-glow: rgba(25, 255, 138, 0.45);
+      --panel: rgba(8, 11, 16, 0.72);
+      --panel-border: rgba(25, 255, 138, 0.22);
+      --text: #eaf6ef;
+      --muted: #8fb6a3;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html {
+      width: 100%; height: 100%; overflow: hidden;
+      background: #04060a;
+      font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+    }
+    #canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #hud { position: absolute; inset: 0; pointer-events: none; user-select: none; }
+
+    /* ---------------- Speedometer ---------------- */
+    .speedo-wrap {
+      position: absolute; bottom: 26px; right: 26px;
+      width: 292px; height: 292px;
+      pointer-events: none;
+      filter: drop-shadow(0 0 24px rgba(0,255,136,0.18));
+    }
+    #tachCanvas { width: 292px; height: 292px; display: block; }
+    .speedo-readout {
+      position: absolute; left: 0; right: 0; bottom: 78px;
+      text-align: center;
+      font-family: 'Courier New', monospace;
+      font-size: 40px; font-weight: 800; letter-spacing: -1px;
+      color: #f4fff8;
+      text-shadow: 0 0 18px var(--accent-glow);
+    }
+    .speedo-unit {
+      position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%);
+      font-size: 10px; letter-spacing: 4px; color: var(--muted);
+    }
+    .gear {
+      position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+      font-size: 18px; font-weight: 800; letter-spacing: 2px; color: var(--accent-2);
+      text-shadow: 0 0 12px rgba(0,229,255,0.6);
+    }
+    .headlight-icon {
+      position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
+      width: 34px; height: 11px; border-radius: 6px;
+      background: #1a2620; border: 1px solid #3a5a4a;
+      transition: background .15s, box-shadow .15s;
+    }
+    .headlight-icon.active { background: var(--accent); box-shadow: 0 0 16px var(--accent-glow); }
+
+    /* ---------------- Nitro ---------------- */
+    .nitro-wrap {
+      position: absolute; top: 22px; left: 22px;
+      width: 230px; pointer-events: none;
+    }
+    .nitro-label {
+      font-size: 10px; letter-spacing: 3px; color: var(--muted); margin-bottom: 6px;
+      display: flex; justify-content: space-between;
+    }
+    .nitro-track {
+      height: 7px; background: rgba(10,16,22,0.65);
+      border: 1px solid var(--panel-border); border-radius: 4px; overflow: hidden;
+    }
+    .nitro-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--accent-2), var(--accent));
+      border-radius: 4px; box-shadow: 0 0 16px var(--accent-glow);
+    }
+
+    /* ---------------- Settings ---------------- */
+    .settings-wrap { position: absolute; top: 20px; right: 20px; width: 320px; pointer-events: auto; }
+    .settings-btn {
+      width: 100%; background: var(--panel); border: 1px solid var(--panel-border);
+      color: var(--text); padding: 11px 14px; border-radius: 9px; cursor: pointer;
+      font-size: 12px; font-weight: 700; letter-spacing: 2px;
+      display: flex; align-items: center; justify-content: space-between;
+      backdrop-filter: blur(10px); transition: border-color .2s, box-shadow .2s;
+    }
+    .settings-btn:hover { border-color: var(--accent); box-shadow: 0 0 22px var(--accent-glow); }
+    .settings-panel {
+      position: absolute; top: 48px; right: 0; width: 320px;
+      background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 12px; padding: 16px;
+      backdrop-filter: blur(16px); box-shadow: 0 24px 70px rgba(0,0,0,0.75);
+      display: none; z-index: 10;
+    }
+    .settings-panel.open { display: block; animation: drop .22s ease; }
+    @keyframes drop { from { opacity: 0; transform: translateY(-10px);} to {opacity:1; transform: translateY(0);} }
+    .settings-panel h3 {
+      font-size: 13px; letter-spacing: 3px; text-transform: uppercase;
+      color: var(--accent); border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 9px; margin-bottom: 14px;
+    }
+    .setting-row { margin-bottom: 14px; font-size: 12px; color: var(--muted); }
+    .setting-row > label { display: flex; justify-content: space-between; margin-bottom: 7px; font-weight: 700; color: var(--text); }
+    .setting-row .val { color: var(--accent); }
+    .setting-row input[type=range] { width: 100%; accent-color: var(--accent); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .toggle {
+      background: transparent; border: 1px solid var(--panel-border); color: var(--text);
+      padding: 8px 9px; border-radius: 7px; cursor: pointer; font-size: 11px; font-weight: 700;
+      transition: all .18s;
+    }
+    .toggle:hover { border-color: var(--accent); }
+    .toggle.active { border-color: var(--accent); color: var(--accent); background: rgba(25,255,138,0.12); }
+    .hint { margin-top: 14px; font-size: 11px; line-height: 1.7; color: var(--muted); border-top: 1px solid var(--panel-border); padding-top: 10px; }
+    .hint b { color: var(--text); }
+
+    .brand {
+      position: absolute; bottom: 22px; left: 22px;
+      font-size: 11px; letter-spacing: 4px; color: var(--muted);
+    }
+    .brand span { color: var(--accent); }
+
+    #loading {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #04060a; color: var(--accent); font-size: 13px; letter-spacing: 5px;
+      transition: opacity .5s; z-index: 50;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <div id="hud">
+    <div class="nitro-wrap">
+      <div class="nitro-label"><span>NITRO</span><span id="nitroPct">100%</span></div>
+      <div class="nitro-track"><div class="nitro-fill" id="nitroFill"></div></div>
+    </div>
+
+    <div class="speedo-wrap">
+      <canvas id="tachCanvas" width="292" height="292"></canvas>
+      <div class="gear" id="gearDisplay">1</div>
+      <div class="headlight-icon" id="headlightIcon"></div>
+      <div class="speedo-readout" id="speedReadout">0</div>
+      <div class="speedo-unit">KM/H</div>
+    </div>
+
+    <div class="settings-wrap">
+      <button class="settings-btn" id="settingsBtn"><span>SETTINGS</span><span>⚙</span></button>
+      <div class="settings-panel" id="settingsPanel">
+        <h3>Race Settings</h3>
+        <div class="setting-row">
+          <label>Traffic Density <span class="val" id="trafficVal">6</span></label>
+          <input type="range" id="trafficDensity" min="0" max="20" value="6" />
+        </div>
+        <div class="setting-row">
+          <label>Camera Distance <span class="val" id="camDistVal">4.5</span></label>
+          <input type="range" id="camDistance" min="3.5" max="12" step="0.5" value="4.5" />
+        </div>
+        <div class="setting-row">
+          <label>Weather / Season</label>
+          <div class="grid2">
+            <button class="toggle active" id="weatherSpring">Spring</button>
+            <button class="toggle" id="weatherSummer">Summer</button>
+            <button class="toggle" id="weatherAutumn">Autumn</button>
+            <button class="toggle" id="weatherRain">Rain</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>Time of Day</label>
+          <div class="grid2">
+            <button class="toggle active" id="timeNight">Midnight</button>
+            <button class="toggle" id="timeDay">Day</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="grid2">
+            <button class="toggle active" id="audioOn">Audio ON</button>
+            <button class="toggle" id="audioOff">Mute</button>
+          </div>
+        </div>
+        <div class="hint">
+          <b>W / ↑</b> accelerate &nbsp; <b>S / ↓</b> brake/reverse<br>
+          <b>A / D</b> steer &nbsp; <b>Space</b> handbrake (drift)<br>
+          <b>Q</b> nitro boost &nbsp; <b>E</b> high-beam headlights
+        </div>
+      </div>
+    </div>
+
+    <div class="brand">MIDNIGHT <span>TUNER</span></div>
+  </div>
+
+  <div id="loading">LOADING CITY…</div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
 </html>
