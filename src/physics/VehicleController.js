@@ -37,8 +37,9 @@ export class VehicleController {
     this.rollResist = 0.013
     this.brakeForce = 24000
 
-    this.maxSteer = 0.58
-    this.steerSpeed = 5.5
+    this.maxSteer = 0.62
+    this.steerSpeed = 7.0
+    this.steerSensitivity = 1.2
 
     /* ---------------- state ---------------- */
     this.X = 2                // start centred in the right-hand lane
@@ -159,10 +160,10 @@ export class VehicleController {
     // convention: positive steer = left, positive v = left, positive r = left
     const steerTarget = (this.input.left ? 1 : 0) + (this.input.right ? -1 : 0)
     const gripSteer = Math.atan((this.mu * G * this.wheelBase) / Math.max(speed * speed, 4))
-    let steerLimit = Math.min(this.maxSteer, gripSteer * 1.25)
+    let steerLimit = Math.min(this.maxSteer, gripSteer * 1.35)
     if (this.input.handbrake) steerLimit *= 1.5
-    const desired = steerTarget * steerLimit
-    const response = this.steerSpeed * (1 - speedFactor * 0.35)
+    const desired = clamp(steerTarget * steerLimit * this.steerSensitivity, -this.maxSteer, this.maxSteer)
+    const response = this.steerSpeed * (1 - speedFactor * 0.3)
     this.steerAngle += (desired - this.steerAngle) * Math.min(1, response * dt * 7)
 
     /* ---- gearbox & rpm ---- */
@@ -300,6 +301,10 @@ export class VehicleController {
 
   setCameraDistance(v) {
     this.camDistance = Math.max(3.5, Math.min(14, v))
+  }
+
+  setSteerSensitivity(v) {
+    this.steerSensitivity = clamp(v, 0.5, 2.0)
   }
 
   _updateCamera(dt, camera, speedFactor) {

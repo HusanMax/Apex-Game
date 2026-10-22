@@ -19,6 +19,8 @@ export class HUDManager {
       trafficVal: document.getElementById('trafficVal'),
       camDistance: document.getElementById('camDistance'),
       camDistVal: document.getElementById('camDistVal'),
+      steerSensitivity: document.getElementById('steerSensitivity'),
+      steerSensVal: document.getElementById('steerSensVal'),
       weatherSpring: document.getElementById('weatherSpring'),
       weatherSummer: document.getElementById('weatherSummer'),
       weatherAutumn: document.getElementById('weatherAutumn'),
@@ -91,6 +93,11 @@ export class HUDManager {
     el.camDistance.addEventListener('input', (e) => {
       el.camDistVal.textContent = Number(e.target.value).toFixed(1)
       this.callbacks.onCameraDistance?.(Number(e.target.value))
+    })
+
+    el.steerSensitivity.addEventListener('input', (e) => {
+      el.steerSensVal.textContent = Number(e.target.value).toFixed(1)
+      this.callbacks.onSteerSensitivity?.(Number(e.target.value))
     })
 
     el.weatherSpring.addEventListener('click', () => {

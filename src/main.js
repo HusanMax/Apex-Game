@@ -35,6 +35,7 @@ const audio = new AudioEngine()
 
 hud.on('onTrafficDensity', (n) => traffic.setDensity(n))
 hud.on('onCameraDistance', (d) => physics.setCameraDistance(d))
+hud.on('onSteerSensitivity', (v) => physics.setSteerSensitivity(v))
 hud.on('onWeather', (type) => environment.setWeather(type))
 hud.on('onTime', (isNight) => {
   environment.setNight(isNight)
@@ -44,6 +45,7 @@ hud.on('onAudio', (enabled) => audio.setEnabled(enabled))
 
 const DEFAULT_TRAFFIC = Number(document.getElementById('trafficDensity').value) || 6
 traffic.setDensity(DEFAULT_TRAFFIC)
+physics.setSteerSensitivity(Number(document.getElementById('steerSensitivity').value) || 1.2)
 
 const startAudio = () => {
   audio.start()
