@@ -162,10 +162,14 @@ export class VehicleController {
     const gripSteer = Math.atan((this.mu * G * this.wheelBase) / Math.max(speed * speed, 4))
     let steerLimit = Math.min(this.maxSteer, gripSteer * 1.45)
     if (this.input.handbrake) steerLimit *= 1.5
-    const desired = clamp(steerTarget * steerLimit * this.steerSensitivity, -this.maxSteer, this.maxSteer)
+    let desired = clamp(steerTarget * steerLimit * this.steerSensitivity, -this.maxSteer, this.maxSteer)
+    const released = steerTarget === 0 && !this.input.handbrake
+    if (released) {
+      desired = clamp(-this.psi * 4.0 - this.r * 0.8, -steerLimit, steerLimit)
+    }
     if (steerTarget !== 0 && this._lastSteer !== steerTarget && Math.abs(this.u) > 6 && !this.input.handbrake) {
       const gripRate = (this.mu * 9.81) / Math.max(Math.abs(this.u), 5)
-      this.r += clamp(steerTarget * Math.min(0.2, gripRate * 0.4) * this.steerSensitivity, -0.26, 0.26)
+      this.r += clamp(steerTarget * Math.min(0.2, gripRate * 0.4) * this.steerSensitivity, -0.2, 0.2)
     }
     this._lastSteer = steerTarget
     const response = this.steerSpeed * (1 - speedFactor * 0.2)
@@ -233,6 +237,12 @@ export class VehicleController {
     // light base damping keeps the car eager to rotate while weaving
     this.v *= (1 - 0.35 * dt)
     this.r *= (1 - 0.3 * dt)
+
+    // steering self-centering: with the wheel released the car straightens
+    // its line instead of continuing to rotate into the next lane.
+    if (released && Math.abs(this.u) > 5) {
+      this.r *= 1 - 5.0 * dt
+    }
 
     // stability management: catch the body before it slides out of line.
     // disabled while the handbrake is pulled so drifting still works.
