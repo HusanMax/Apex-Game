@@ -20,25 +20,25 @@ export class VehicleController {
     this.a = 1.25            // CG -> front axle
     this.b = 1.35            // CG -> rear axle
     this.cgHeight = 0.42
-    this.Cf = 92000
-    this.Cr = 112000
-    this.mu = 1.35
+    this.Cf = 110000
+    this.Cr = 106000
+    this.mu = 1.48
     this.wheelRadius = 0.38
 
-    this.finalDrive = 3.90
-    this.gearRatios = [3.30, 2.15, 1.55, 1.18, 0.95, 0.78]
-    this.redline = 7600
+    this.finalDrive = 3.60
+    this.gearRatios = [3.30, 2.15, 1.55, 1.18, 0.95, 0.78, 0.63]
+    this.redline = 8500
     this.idle = 850
-    this.maxTorque = 420
+    this.maxTorque = 640
 
-    this.dragCd = 0.31
-    this.area = 2.10
+    this.dragCd = 0.28
+    this.area = 2.00
     this.rho = 1.20
     this.rollResist = 0.013
-    this.brakeForce = 19500
+    this.brakeForce = 24000
 
-    this.maxSteer = 0.55
-    this.steerSpeed = 4.0
+    this.maxSteer = 0.58
+    this.steerSpeed = 5.5
 
     /* ---------------- state ---------------- */
     this.X = 2                // start centred in the right-hand lane
@@ -57,9 +57,15 @@ export class VehicleController {
     this.nitro = 100
     this.nitroMax = 100
     this.nitroActive = false
-    this.nitroConsume = 26
-    this.nitroRegen = 9
+    this.nitroConsume = 16
+    this.nitroRegen = 10
     this.nitroCooldown = 0
+
+    this.shiftPitch = 0
+    this.slip = 0
+    this.absActive = false
+    this.tcsActive = false
+    this.stmActive = false
 
     this.camVel = new THREE.Vector3()
     this.camYaw = 0
@@ -126,10 +132,16 @@ export class VehicleController {
     if (this.u < -0.5) return // reverse
     const gearRatio = this.gearRatios[this.gear - 1]
     const wheelRpm = (Math.abs(this.u) / this.wheelRadius) * gearRatio * this.finalDrive * 60 / (2 * Math.PI)
-    if (wheelRpm > this.redline * 0.93 && this.gear < 6) {
-      this.gear++; this.shiftTimer = 0.18
+    if (wheelRpm > this.redline * 0.93 && this.gear < this.gearRatios.length) {
+      this.gear++
+      this.shiftTimer = 0.13
+      this.shiftPitch = -0.018
+      this.shake = Math.max(this.shake, 0.14)
     } else if (wheelRpm < 2100 && this.gear > 1) {
-      this.gear--; this.shiftTimer = 0.14
+      this.gear--
+      this.shiftTimer = 0.11
+      this.shiftPitch = 0.014
+      this.shake = Math.max(this.shake, 0.1)
     }
   }
 
@@ -147,11 +159,11 @@ export class VehicleController {
     // convention: positive steer = left, positive v = left, positive r = left
     const steerTarget = (this.input.left ? 1 : 0) + (this.input.right ? -1 : 0)
     const gripSteer = Math.atan((this.mu * G * this.wheelBase) / Math.max(speed * speed, 4))
-    let steerLimit = Math.min(this.maxSteer, gripSteer * 1.15)
-    if (this.input.handbrake) steerLimit *= 1.6
+    let steerLimit = Math.min(this.maxSteer, gripSteer * 1.25)
+    if (this.input.handbrake) steerLimit *= 1.5
     const desired = steerTarget * steerLimit
-    const response = this.steerSpeed * (1 - speedFactor * 0.45)
-    this.steerAngle += (desired - this.steerAngle) * Math.min(1, response * dt * 6)
+    const response = this.steerSpeed * (1 - speedFactor * 0.35)
+    this.steerAngle += (desired - this.steerAngle) * Math.min(1, response * dt * 7)
 
     /* ---- gearbox & rpm ---- */
     this._updateGearbox(dt)
@@ -163,7 +175,8 @@ export class VehicleController {
     /* ---- longitudinal forces ---- */
     const tq = this._torqueCurve(this.rpm / this.redline) * this.maxTorque
     let driveForce = this.throttle * tq * gearRatio * this.finalDrive / this.wheelRadius * 0.85
-    if (this.nitroActive) driveForce *= 1.5
+    if (this.nitroActive) driveForce *= 2.5
+    if (this.shiftTimer > 0) driveForce *= 0.12
 
     const Fdrag = -0.5 * this.rho * this.dragCd * this.area * this.u * Math.abs(this.u)
     const Froll = -this.rollResist * this.mass * G * Math.sign(this.u)
@@ -179,13 +192,13 @@ export class VehicleController {
       }
     }
     if (this.input.handbrake) {
-      Fx -= 12500 * Math.sign(this.u || 1)
+      Fx -= 6500 * Math.sign(this.u || 1)
     }
 
     const ax = Fx / this.mass
     this.longAccel = ax
     this.u += ax * dt
-    this.u = clamp(this.u, -12, 82)
+    this.u = clamp(this.u, -12, 117)
 
     /* ---- lateral tyre model (dynamic bicycle) ---- */
     const absU = Math.max(Math.abs(this.u), 1.5)
@@ -195,7 +208,7 @@ export class VehicleController {
     const FzF = Math.max(this.mass * G * this.b / this.wheelBase - this.mass * ax * this.cgHeight / this.wheelBase, this.mass * G * 0.2)
     const FzR = Math.max(this.mass * G * this.a / this.wheelBase + this.mass * ax * this.cgHeight / this.wheelBase, this.mass * G * 0.2)
 
-    const muR = this.input.handbrake ? this.mu * 0.55 : this.mu
+    const muR = this.input.handbrake ? this.mu * 0.45 : this.mu
     const maxFyF = this.mu * FzF
     const maxFyR = muR * FzR
 
@@ -211,11 +224,22 @@ export class VehicleController {
     this.v += vDot * dt
     this.r += rDot * dt
 
-    // stability damping
-    this.v *= (1 - 0.8 * dt)
-    this.r *= (1 - 1.2 * dt)
+    // light base damping keeps the car eager to rotate while weaving
+    this.v *= (1 - 0.42 * dt)
+    this.r *= (1 - 0.55 * dt)
+
+    // stability management: catch the body before it slides out of line.
+    // disabled while the handbrake is pulled so drifting still works.
+    this.slip = Math.atan2(this.v, Math.max(Math.abs(this.u), 1))
+    this.stmActive = !this.input.handbrake && Math.abs(this.u) > 8 && Math.abs(this.slip) > 0.13
+    if (this.stmActive) {
+      const excess = Math.abs(this.slip) - 0.13
+      this.v *= 1 - Math.min(2.4, excess * 6) * dt
+      this.r *= 1 - Math.min(1.4, excess * 4) * dt
+    }
+
     this.v = clamp(this.v, -16, 16)
-    this.r = clamp(this.r, -1.8, 1.8)
+    this.r = clamp(this.r, -2.2, 2.2)
 
     this.psi += this.r * dt
 
@@ -249,12 +273,18 @@ export class VehicleController {
     this.vehicle.speedKmh = speedKmh
     this.vehicle.setPosition(this.X, 0, this.Z, this.psi)
 
-    // body roll into corners + pitch under braking/acceleration
+    // driver aids (also reflected on the new HUD)
+    this.absActive = this.brakeInput > 0.5 && speedKmh > 25
+    this.tcsActive = this.throttle > 0.5 && this.gear <= 2 && speedKmh < 95
+
+    // subtle body roll into corners + pitch under braking/acceleration
     const lateralAccel = this.u * this.r
-    const targetRoll = clamp(-lateralAccel * 0.008, -0.06, 0.06)
-    const targetPitch = clamp(this.longAccel * 0.004, -0.045, 0.045)
-    this.bodyRoll += (targetRoll - this.bodyRoll) * Math.min(1, dt * 6)
-    this.bodyPitch += (targetPitch - this.bodyPitch) * Math.min(1, dt * 6)
+    const rollScale = clamp(Math.abs(this.u) / 7, 0, 1)
+    const targetRoll = clamp(-lateralAccel * 0.006, -0.04, 0.04) * rollScale
+    this.shiftPitch *= Math.max(0, 1 - dt * 9)
+    const targetPitch = clamp(this.longAccel * 0.0035 + this.shiftPitch, -0.05, 0.05)
+    this.bodyRoll += (targetRoll - this.bodyRoll) * Math.min(1, dt * 7)
+    this.bodyPitch += (targetPitch - this.bodyPitch) * Math.min(1, dt * 8)
     this.vehicle.setBodyAttitude(this.bodyRoll, this.bodyPitch)
 
     this.vehicle.update(dt, Math.abs(this.u))
@@ -312,13 +342,20 @@ export class VehicleController {
 
   get state() {
     const speedKmh = Math.hypot(this.u, this.v) * 3.6
+    let gear = this.gear
+    if (this.u < -0.5) gear = 'R'
+    else if (Math.abs(this.u) < 0.35 && this.throttle < 0.05) gear = 'N'
     return {
       speedKmh,
       rpm: this.rpm,
-      gear: this.u < -0.5 ? 'R' : this.gear,
+      gear,
       nitro: this.nitro,
       nitroActive: this.nitroActive,
       headlights: this.input.headlights,
+      abs: this.absActive,
+      tcs: this.tcsActive,
+      stm: this.stmActive,
+      slip: this.slip,
       speedFactor: Math.min(Math.hypot(this.u, this.v) / 70, 1)
     }
   }
