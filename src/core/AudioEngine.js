@@ -280,7 +280,7 @@ export class AudioEngine {
     return { src, gain, filter: lp }
   }
 
-  update(rpm, throttle, nitro, gear = null, speedKmh = 0, brake = 0, handbrake = 0, slip = 0) {
+  update(rpm, throttle, nitro, gear = null, speedKmh = 0, brake = 0, handbrake = 0, slip = 0, tireSlipRatio = 0) {
     if (!this.ctx || !this.started) return
     const t = this.ctx.currentTime
     const rpmFrac = clamp(rpm / 9000, 0, 1)
@@ -362,7 +362,7 @@ export class AudioEngine {
 
     const hardBrake = braking > 0.5 && speedKmh > 25
     const sliding = handbrake > 0.5 && speedKmh > 12
-    const slipping = Math.abs(slip) > 0.16 && speedKmh > 25
+    const slipping = Math.max(Math.abs(slip), Math.abs(tireSlipRatio) * 0.85) > 0.16 && speedKmh > 25
     const screechAmt = (hardBrake || sliding || slipping)
       ? 0.06 * Math.min(1, speedKmh / 70) * (slipping ? 1.2 : 1)
       : 0

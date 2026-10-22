@@ -21,6 +21,9 @@ export class HUDManager {
       camDistVal: document.getElementById('camDistVal'),
       steerSensitivity: document.getElementById('steerSensitivity'),
       steerSensVal: document.getElementById('steerSensVal'),
+      absOn: document.getElementById('absOn'),
+      absOff: document.getElementById('absOff'),
+      absState: document.getElementById('absState'),
       weatherSpring: document.getElementById('weatherSpring'),
       weatherSummer: document.getElementById('weatherSummer'),
       weatherAutumn: document.getElementById('weatherAutumn'),
@@ -98,6 +101,19 @@ export class HUDManager {
     el.steerSensitivity.addEventListener('input', (e) => {
       el.steerSensVal.textContent = Number(e.target.value).toFixed(1)
       this.callbacks.onSteerSensitivity?.(Number(e.target.value))
+    })
+
+    el.absOn.addEventListener('click', () => {
+      el.absOn.classList.add('active')
+      el.absOff.classList.remove('active')
+      el.absState.textContent = 'ON'
+      this.callbacks.onABS?.(true)
+    })
+    el.absOff.addEventListener('click', () => {
+      el.absOff.classList.add('active')
+      el.absOn.classList.remove('active')
+      el.absState.textContent = 'OFF'
+      this.callbacks.onABS?.(false)
     })
 
     el.weatherSpring.addEventListener('click', () => {

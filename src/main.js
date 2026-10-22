@@ -36,6 +36,7 @@ const audio = new AudioEngine()
 hud.on('onTrafficDensity', (n) => traffic.setDensity(n))
 hud.on('onCameraDistance', (d) => physics.setCameraDistance(d))
 hud.on('onSteerSensitivity', (v) => physics.setSteerSensitivity(v))
+hud.on('onABS', (on) => physics.setAbsEnabled(on))
 hud.on('onWeather', (type) => environment.setWeather(type))
 hud.on('onTime', (isNight) => {
   environment.setNight(isNight)
@@ -83,7 +84,8 @@ function loop(now) {
     state.speedKmh,
     physics.input.backward ? 1 : 0,
     physics.input.handbrake ? 1 : 0,
-    state.slip
+    state.slip,
+    state.tireSlipRatio
   )
 
   renderer.render()

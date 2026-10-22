@@ -131,7 +131,7 @@
       background: var(--panel); border: 1px solid var(--panel-border);
       border-radius: 12px; padding: 16px;
       backdrop-filter: blur(16px); box-shadow: 0 24px 70px rgba(0,0,0,0.75);
-      display: none; z-index: 10;
+      display: none; z-index: 10; max-height: calc(100vh - 90px); overflow-y: auto;
     }
     .settings-panel.open { display: block; animation: drop .22s ease; }
     @keyframes drop { from { opacity: 0; transform: translateY(-10px);} to {opacity:1; transform: translateY(0);} }
@@ -210,6 +210,13 @@
           <input type="range" id="steerSensitivity" min="0.5" max="2" step="0.1" value="1.3" />
         </div>
         <div class="setting-row">
+          <label>ABS <span class="val" id="absState">ON</span></label>
+          <div class="grid2">
+            <button class="toggle active" id="absOn">ABS ON</button>
+            <button class="toggle" id="absOff">ABS OFF</button>
+          </div>
+        </div>
+        <div class="setting-row">
           <label>Weather / Season</label>
           <div class="grid2">
             <button class="toggle active" id="weatherSpring">Spring</button>
@@ -234,7 +241,8 @@
         <div class="hint">
           <b>W / ↑</b> accelerate &nbsp; <b>S / ↓</b> brake/reverse<br>
           <b>A / D</b> steer &nbsp; <b>Space</b> handbrake (drift)<br>
-          <b>Q</b> nitro boost &nbsp; <b>E</b> high-beam headlights
+          <b>Q</b> nitro boost &nbsp; <b>E</b> high-beam headlights<br>
+          <b>X / Z</b> manual upshift / downshift
         </div>
       </div>
     </div>
