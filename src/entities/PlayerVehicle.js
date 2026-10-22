@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
-const PAINT = 0xf4f6f9        // glossy pearl white
+const PAINT = 0xe8ecf0        // satin pearl white (night)
+const PAINT_DAY = 0xb9c2cc    // cooler, non-glaring paint for daylight
 
 function makeGlowTexture() {
   const c = document.createElement('canvas')
@@ -38,8 +39,11 @@ export class PlayerVehicle {
     this.taillights = []
 
     this.effects = new Set()
+    this.paintMaterials = []
+    this.glassMaterials = []
     this.model = null
     this.modelLoaded = false
+    this.dayMode = false
 
     this.build()
     this._applyTransform()
@@ -52,11 +56,12 @@ export class PlayerVehicle {
     const paint = new THREE.MeshPhysicalMaterial({
       color: PAINT,
       metalness: 0.0,
-      roughness: 0.58,
-      clearcoat: 0.18,
-      clearcoatRoughness: 0.4,
-      envMapIntensity: 0.25
+      roughness: 0.62,
+      clearcoat: 0.1,
+      clearcoatRoughness: 0.6,
+      envMapIntensity: 0.16
     })
+    this.paintMaterials.push(paint)
     const carbon = new THREE.MeshStandardMaterial({ color: 0x0a0b0e, roughness: 0.42, metalness: 0.55 })
     const glass = new THREE.MeshPhysicalMaterial({
       color: 0x0a141b, metalness: 0.4, roughness: 0.06,
@@ -218,8 +223,8 @@ export class PlayerVehicle {
     }
 
     /* ---------------- soft fill light ---------------- */
-    this.fillLight = new THREE.PointLight(0xe4f1ff, 16, 15, 2)
-    this.fillLight.position.set(0, 4.6, -0.4)
+    this.fillLight = new THREE.PointLight(0xe4f1ff, 9, 14, 2)
+    this.fillLight.position.set(0, 4.2, -0.4)
     g.add(this.fillLight)
     this.effects.add(this.fillLight)
 
@@ -366,15 +371,17 @@ export class PlayerVehicle {
               m.roughness = Math.max(m.roughness ?? 0.2, 0.34)
               m.metalness = Math.min(m.metalness ?? 0, 0.25)
               if ('envMapIntensity' in m) m.envMapIntensity = 0.28
+              if (!this.glassMaterials.includes(m)) this.glassMaterials.push(m)
             }
             if (name === 'primary') {
-              // flat pearl white: no metallic glints
+              // flat satin paint: no metallic glints
               m.color.setHex(PAINT)
               m.metalness = 0.0
-              m.roughness = 0.58
-              m.clearcoat = 0.18
-              m.clearcoatRoughness = 0.4
-              if ('envMapIntensity' in m) m.envMapIntensity = 0.25
+              m.roughness = 0.62
+              m.clearcoat = 0.1
+              m.clearcoatRoughness = 0.6
+              if ('envMapIntensity' in m) m.envMapIntensity = 0.16
+              if (!this.paintMaterials.includes(m)) this.paintMaterials.push(m)
             } else if (name.includes('front_light')) {
               m.color.setHex(0xffffff)
               if (m.emissive) { m.emissive.setHex(0xffffff); m.emissiveIntensity = 1.6 }
@@ -444,6 +451,7 @@ export class PlayerVehicle {
         this.model = root
         this.group.add(root)
         this.modelLoaded = true
+        this.setDayMode(this.dayMode)
         this._hideProcedural()
         for (const shaft of this.lightShafts) shaft.visible = false
         onLoaded?.(root)
@@ -564,6 +572,30 @@ export class PlayerVehicle {
     }
     for (const shaft of this.lightShafts) shaft.visible = this.headlightsOn && !this.modelLoaded
     return this.headlightsOn
+  }
+
+  setDayMode(isDay) {
+    this.dayMode = isDay
+
+    const paintColor = isDay ? PAINT_DAY : PAINT
+    for (const m of this.paintMaterials) {
+      m.color.setHex(paintColor)
+      m.metalness = 0
+      m.roughness = isDay ? 0.82 : 0.62
+      m.clearcoat = isDay ? 0.0 : 0.1
+      m.clearcoatRoughness = isDay ? 1.0 : 0.6
+      if ('envMapIntensity' in m) m.envMapIntensity = isDay ? 0.06 : 0.16
+      m.needsUpdate = true
+    }
+
+    for (const m of this.glassMaterials) {
+      if ('envMapIntensity' in m) m.envMapIntensity = isDay ? 0.12 : 0.28
+      m.roughness = Math.max(m.roughness ?? 0.2, isDay ? 0.52 : 0.34)
+      m.needsUpdate = true
+    }
+
+    // the overhead fill light makes the paint bloom in daylight
+    if (this.fillLight) this.fillLight.intensity = isDay ? 1.2 : 9
   }
 
   setNitroColor(active, boostIntensity = 1) {

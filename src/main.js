@@ -36,7 +36,10 @@ const audio = new AudioEngine()
 hud.on('onTrafficDensity', (n) => traffic.setDensity(n))
 hud.on('onCameraDistance', (d) => physics.setCameraDistance(d))
 hud.on('onWeather', (type) => environment.setWeather(type))
-hud.on('onTime', (isNight) => environment.setNight(isNight))
+hud.on('onTime', (isNight) => {
+  environment.setNight(isNight)
+  vehicle.setDayMode(!isNight)
+})
 hud.on('onAudio', (enabled) => audio.setEnabled(enabled))
 
 const DEFAULT_TRAFFIC = Number(document.getElementById('trafficDensity').value) || 6
