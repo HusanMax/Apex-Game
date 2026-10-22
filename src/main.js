@@ -60,7 +60,10 @@ function loop(now) {
   physics.update(dt, environment.camera)
 
   const collided = traffic.update(dt, vehicle.position.z, vehicle.position.x)
-  if (collided) physics.registerCollision()
+  if (collided) {
+    physics.registerCollision()
+    audio.collision()
+  }
 
   environment.updateWeather(dt, vehicle.position.z)
 
@@ -74,7 +77,8 @@ function loop(now) {
     state.gear,
     state.speedKmh,
     physics.input.backward ? 1 : 0,
-    physics.input.handbrake ? 1 : 0
+    physics.input.handbrake ? 1 : 0,
+    state.slip
   )
 
   renderer.render()
