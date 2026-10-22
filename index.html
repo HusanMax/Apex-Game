@@ -24,34 +24,74 @@
     #canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
     #hud { position: absolute; inset: 0; pointer-events: none; user-select: none; }
 
-    /* ---------------- Speedometer ---------------- */
+    /* ---------------- Forza Horizon style cluster ---------------- */
     .speedo-wrap {
-      position: absolute; bottom: 26px; right: 26px;
-      width: 292px; height: 292px;
+      position: absolute; bottom: 10px; right: 14px;
+      width: 350px; height: 350px;
       pointer-events: none;
-      filter: drop-shadow(0 0 24px rgba(0,255,136,0.18));
+      filter: drop-shadow(0 0 30px rgba(0,229,255,0.15));
     }
-    #tachCanvas { width: 292px; height: 292px; display: block; }
-    .speedo-readout {
-      position: absolute; left: 0; right: 0; bottom: 78px;
-      text-align: center;
-      font-family: 'Courier New', monospace;
-      font-size: 40px; font-weight: 800; letter-spacing: -1px;
-      color: #f4fff8;
-      text-shadow: 0 0 18px var(--accent-glow);
+    #speedoCanvas { width: 350px; height: 350px; display: block; }
+
+    .status-lamps {
+      position: absolute; top: 33%; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 6px;
     }
-    .speedo-unit {
-      position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%);
-      font-size: 10px; letter-spacing: 4px; color: var(--muted);
+    .lamp {
+      font-size: 9px; font-weight: 800; letter-spacing: 1.2px;
+      padding: 2px 6px; border-radius: 4px;
+      border: 1px solid rgba(150,180,200,0.22);
+      color: rgba(160,190,205,0.32);
+      background: rgba(5,10,14,0.35);
+      transition: color .12s, background .12s, box-shadow .12s, border-color .12s;
     }
-    .gear {
-      position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
-      font-size: 18px; font-weight: 800; letter-spacing: 2px; color: var(--accent-2);
-      text-shadow: 0 0 12px rgba(0,229,255,0.6);
+    .lamp.active {
+      color: #031014; border-color: #19ff8a; background: #19ff8a;
+      box-shadow: 0 0 14px rgba(25,255,138,0.8);
     }
+
+    .gear-ring {
+      position: absolute; top: 53%; left: 50%;
+      width: 78px; height: 78px; transform: translate(-50%, -50%);
+      border-radius: 50%;
+      border: 2px solid rgba(0,229,255,0.92);
+      background: radial-gradient(circle at 50% 36%, rgba(0,54,72,0.92), rgba(2,8,12,0.94) 72%);
+      box-shadow: 0 0 20px rgba(0,229,255,0.5), inset 0 0 20px rgba(0,229,255,0.32);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .gear-ring::before {
+      content: ''; position: absolute; inset: -10px;
+      border-radius: 50%; border: 1px solid rgba(0,229,255,0.25);
+      box-shadow: 0 0 22px rgba(0,229,255,0.18);
+    }
+    #gearDisplay {
+      font-family: 'Arial Narrow', 'Segoe UI', Arial, sans-serif;
+      font-size: 40px; font-weight: 900; font-style: italic;
+      color: #f2ffff; line-height: 1;
+      text-shadow: 0 0 14px rgba(0,229,255,0.95);
+    }
+
+    .speed-readout {
+      position: absolute; right: 4px; bottom: 12px;
+      display: flex; flex-direction: column; align-items: flex-end;
+      line-height: 0.86;
+    }
+    #speedReadout {
+      font-family: 'Arial Black', 'Segoe UI', Arial, sans-serif;
+      font-style: italic; font-weight: 900;
+      font-size: 58px; letter-spacing: -3px;
+      color: #ffffff;
+      text-shadow: 0 0 20px rgba(0,229,255,0.55), 0 2px 0 rgba(0,0,0,0.55);
+    }
+    #speedUnit {
+      margin-top: 4px; margin-right: 5px;
+      font-size: 11px; font-style: italic; font-weight: 700;
+      letter-spacing: 4px; color: #9feaff;
+      text-shadow: 0 0 10px rgba(0,229,255,0.6);
+    }
+
     .headlight-icon {
-      position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
-      width: 34px; height: 11px; border-radius: 6px;
+      width: 40px; height: 8px; border-radius: 5px; margin-top: 9px;
       background: #1a2620; border: 1px solid #3a5a4a;
       transition: background .15s, box-shadow .15s;
     }
@@ -136,14 +176,21 @@
     <div class="nitro-wrap">
       <div class="nitro-label"><span>NITRO</span><span id="nitroPct">100%</span></div>
       <div class="nitro-track"><div class="nitro-fill" id="nitroFill"></div></div>
+      <div class="headlight-icon" id="headlightIcon" title="Headlights"></div>
     </div>
 
     <div class="speedo-wrap">
-      <canvas id="tachCanvas" width="292" height="292"></canvas>
-      <div class="gear" id="gearDisplay">1</div>
-      <div class="headlight-icon" id="headlightIcon"></div>
-      <div class="speedo-readout" id="speedReadout">0</div>
-      <div class="speedo-unit">KM/H</div>
+      <canvas id="speedoCanvas" width="350" height="350"></canvas>
+      <div class="status-lamps">
+        <span class="lamp" id="absLamp">ABS</span>
+        <span class="lamp" id="tcsLamp">TCS</span>
+        <span class="lamp" id="stmLamp">STM</span>
+      </div>
+      <div class="gear-ring"><span id="gearDisplay">N</span></div>
+      <div class="speed-readout">
+        <span id="speedReadout">0</span>
+        <span id="speedUnit">KM/H</span>
+      </div>
     </div>
 
     <div class="settings-wrap">

@@ -4,11 +4,15 @@ export class HUDManager {
   constructor() {
     this.el = {
       speedReadout: document.getElementById('speedReadout'),
+      speedUnit: document.getElementById('speedUnit'),
       gearDisplay: document.getElementById('gearDisplay'),
       nitroFill: document.getElementById('nitroFill'),
       nitroPct: document.getElementById('nitroPct'),
       headlightIcon: document.getElementById('headlightIcon'),
-      tachCanvas: document.getElementById('tachCanvas'),
+      absLamp: document.getElementById('absLamp'),
+      tcsLamp: document.getElementById('tcsLamp'),
+      stmLamp: document.getElementById('stmLamp'),
+      speedoCanvas: document.getElementById('speedoCanvas'),
       settingsBtn: document.getElementById('settingsBtn'),
       settingsPanel: document.getElementById('settingsPanel'),
       trafficDensity: document.getElementById('trafficDensity'),
@@ -28,17 +32,25 @@ export class HUDManager {
     this.callbacks = {}
     this.settingsOpen = false
 
-    // hi-dpi tach canvas
-    this.ctx = this.el.tachCanvas.getContext('2d')
+    /* ---- high-dpi tach canvas ---- */
+    this.ctx = this.el.speedoCanvas.getContext('2d')
     this.dpr = Math.min(window.devicePixelRatio || 1, 2)
-    this.size = 292
-    this.el.tachCanvas.width = this.size * this.dpr
-    this.el.tachCanvas.height = this.size * this.dpr
+    this.size = 350
+    this.el.speedoCanvas.width = this.size * this.dpr
+    this.el.speedoCanvas.height = this.size * this.dpr
     this.ctx.scale(this.dpr, this.dpr)
-    this._lastRpm = -1
+
+    this.startAngle = Math.PI * (140 / 180)
+    this.endAngle = Math.PI * (400 / 180)
+    this.sweep = this.endAngle - this.startAngle
+    this.maxRpm = 9000
+    this.redline = 8000
+
+    this.needle = 0
+    this._lastTime = performance.now()
 
     this._bind()
-    this._drawTach(0)
+    this._draw(0)
   }
 
   on(event, fn) { this.callbacks[event] = fn }
@@ -110,129 +122,155 @@ export class HUDManager {
   }
 
   update(state) {
-    const kmh = Math.round(state.speedKmh)
-    this.el.speedReadout.textContent = kmh
-    this.el.gearDisplay.textContent = state.gear
+    const now = performance.now()
+    const dt = Math.min(Math.max((now - this._lastTime) / 1000, 0), 0.06)
+    this._lastTime = now
+
+    const target = clamp(state.rpm / this.maxRpm, 0, 1)
+    const response = target > this.needle ? 15 : 9
+    this.needle += (target - this.needle) * Math.min(1, dt * response)
+    this._draw(this.needle)
+
+    this.el.speedReadout.textContent = Math.round(state.speedKmh)
+    this.el.gearDisplay.textContent = String(state.gear)
+    this.el.speedUnit.textContent = 'KM/H'
+
     const pct = Math.round(state.nitro)
     this.el.nitroFill.style.width = `${pct}%`
     this.el.nitroPct.textContent = `${pct}%`
     this.el.headlightIcon.classList.toggle('active', state.headlights)
 
-    const rpmRounded = Math.round(state.rpm / 25) * 25
-    if (rpmRounded !== this._lastRpm) {
-      this._lastRpm = rpmRounded
-      this._drawTach(state.rpm)
-    }
+    this.el.absLamp.classList.toggle('active', !!state.abs)
+    this.el.tcsLamp.classList.toggle('active', !!state.tcs)
+    this.el.stmLamp.classList.toggle('active', !!state.stm)
   }
 
-  _drawTach(rpm) {
+  _draw(needleFrac) {
     const ctx = this.ctx
     const W = this.size
     const cx = W / 2
-    const cy = W / 2
-    const R = 116
+    const cy = W * 0.53
+    const R = W * 0.385
+    const { startAngle, endAngle, sweep } = this
 
     ctx.clearRect(0, 0, W, W)
 
-    const start = Math.PI * 0.75
-    const end = Math.PI * 2.25
-    const sweep = end - start
-
-    // outer glow ring
+    /* ---- dark glass backing so the dial reads in daylight ---- */
+    const disc = ctx.createRadialGradient(cx, cy - 18, R * 0.15, cx, cy, R + 20)
+    disc.addColorStop(0, 'rgba(3,9,13,0.62)')
+    disc.addColorStop(0.72, 'rgba(3,9,13,0.44)')
+    disc.addColorStop(1, 'rgba(3,9,13,0)')
     ctx.beginPath()
-    ctx.arc(cx, cy, R + 10, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(25,255,138,0.18)'
-    ctx.lineWidth = 1.5
-    ctx.stroke()
-
-    // dial base
-    ctx.beginPath()
-    ctx.arc(cx, cy, R + 2, 0, Math.PI * 2)
-    const bg = ctx.createRadialGradient(cx, cy - 20, 10, cx, cy, R + 10)
-    bg.addColorStop(0, 'rgba(16,22,28,0.92)')
-    bg.addColorStop(1, 'rgba(5,8,11,0.96)')
-    ctx.fillStyle = bg
+    ctx.arc(cx, cy, R + 20, 0, Math.PI * 2)
+    ctx.fillStyle = disc
     ctx.fill()
 
-    // arc track
+    /* ---- soft outer halo ---- */
+    const halo = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, R + 24)
+    halo.addColorStop(0, 'rgba(0,229,255,0)')
+    halo.addColorStop(0.72, 'rgba(0,229,255,0.045)')
+    halo.addColorStop(1, 'rgba(0,229,255,0)')
     ctx.beginPath()
-    ctx.arc(cx, cy, R, start, end)
-    ctx.strokeStyle = 'rgba(120,170,150,0.16)'
-    ctx.lineWidth = 9
+    ctx.arc(cx, cy, R + 24, 0, Math.PI * 2)
+    ctx.fillStyle = halo
+    ctx.fill()
+
+    /* ---- dial track ---- */
+    ctx.beginPath()
+    ctx.arc(cx, cy, R, startAngle, endAngle)
+    ctx.strokeStyle = 'rgba(170,210,225,0.13)'
+    ctx.lineWidth = 10
+    ctx.lineCap = 'round'
     ctx.stroke()
 
-    // redline zone
-    ctx.beginPath()
-    ctx.arc(cx, cy, R, start + (7 / 8) * sweep, end)
-    ctx.strokeStyle = 'rgba(255,45,80,0.6)'
-    ctx.lineWidth = 9
-    ctx.stroke()
-
-    // ticks + labels
-    for (let i = 0; i <= 8; i++) {
-      const a = start + (i / 8) * sweep
-      const isMajor = true
-      const r0 = R - (isMajor ? 16 : 10)
-      const r1 = R - 4
+    /* ---- rpm progress ---- */
+    if (needleFrac > 0.002) {
       ctx.beginPath()
-      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0)
-      ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1)
-      ctx.strokeStyle = i >= 7 ? 'rgba(255,80,110,0.9)' : 'rgba(210,240,225,0.75)'
-      ctx.lineWidth = 2
+      ctx.arc(cx, cy, R, startAngle, startAngle + needleFrac * sweep)
+      ctx.strokeStyle = 'rgba(235,255,255,0.28)'
+      ctx.lineWidth = 10
       ctx.stroke()
-
-      // minor ticks
-      for (let m = 1; m < 5; m++) {
-        const am = a + (m / 5) * (sweep / 8)
-        ctx.beginPath()
-        ctx.moveTo(cx + Math.cos(am) * (R - 9), cy + Math.sin(am) * (R - 4))
-        ctx.lineTo(cx + Math.cos(am) * (R - 4), cy + Math.sin(am) * (R - 4))
-        ctx.strokeStyle = 'rgba(160,200,185,0.35)'
-        ctx.lineWidth = 1
-        ctx.stroke()
-      }
-
-      // labels
-      const lx = cx + Math.cos(a) * (R - 30)
-      const ly = cy + Math.sin(a) * (R - 30)
-      ctx.fillStyle = i >= 7 ? 'rgba(255,120,140,0.9)' : 'rgba(200,230,215,0.75)'
-      ctx.font = '600 11px "Segoe UI", sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(String(i), lx, ly)
     }
 
-    // needle
-    const frac = clamp(rpm / 8000, 0, 1)
-    const angle = start + frac * sweep
-    const nx = cx + Math.cos(angle) * (R - 22)
-    const ny = cy + Math.sin(angle) * (R - 22)
-
+    /* ---- redline 8-9 ---- */
+    const redFrom = startAngle + (this.redline / this.maxRpm) * sweep
     ctx.save()
-    ctx.shadowColor = 'rgba(25,255,138,0.9)'
-    ctx.shadowBlur = 14
     ctx.beginPath()
-    ctx.moveTo(cx - Math.cos(angle) * 14, cy - Math.sin(angle) * 14)
-    ctx.lineTo(nx, ny)
-    ctx.strokeStyle = frac > 0.87 ? '#ff3860' : '#19ff8a'
-    ctx.lineWidth = 3
+    ctx.arc(cx, cy, R, redFrom, endAngle)
+    ctx.strokeStyle = 'rgba(255,45,80,0.85)'
+    ctx.lineWidth = 10
     ctx.lineCap = 'round'
+    ctx.shadowColor = 'rgba(255,45,80,0.9)'
+    ctx.shadowBlur = 14
     ctx.stroke()
     ctx.restore()
 
-    // hub
+    /* ---- ticks and numbers 0..9 ---- */
+    ctx.save()
+    ctx.shadowColor = 'rgba(0,0,0,0.9)'
+    ctx.shadowBlur = 4
+    for (let i = 0; i <= 45; i++) {
+      const major = i % 5 === 0
+      const a = startAngle + (i / 45) * sweep
+      const value = i / 5
+      const hot = value >= this.redline / 1000
+      const r0 = R - (major ? 22 : 12)
+      const r1 = R - 8
+
+      ctx.beginPath()
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0)
+      ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1)
+      ctx.strokeStyle = hot
+        ? (major ? 'rgba(255,120,145,0.95)' : 'rgba(255,90,120,0.6)')
+        : (major ? 'rgba(240,255,255,0.9)' : 'rgba(180,215,225,0.4)')
+      ctx.lineWidth = major ? 2 : 1
+      ctx.stroke()
+
+      if (major) {
+        const lx = cx + Math.cos(a) * (R - 40)
+        const ly = cy + Math.sin(a) * (R - 40)
+        ctx.fillStyle = hot ? 'rgba(255,130,150,0.95)' : 'rgba(235,250,255,0.88)'
+        ctx.font = '700 13px "Segoe UI", Arial, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(String(value), lx, ly)
+      }
+    }
+    ctx.restore()
+
+    /* ---- needle ---- */
+    const angle = startAngle + clamp(needleFrac, 0, 1) * sweep
+    const tip = R - 26
+    ctx.save()
+    ctx.shadowColor = 'rgba(255,255,255,0.95)'
+    ctx.shadowBlur = 18
     ctx.beginPath()
-    ctx.arc(cx, cy, 8, 0, Math.PI * 2)
-    ctx.fillStyle = '#0b1114'
+    ctx.moveTo(cx - Math.cos(angle) * 20, cy - Math.sin(angle) * 20)
+    ctx.lineTo(cx + Math.cos(angle) * tip, cy + Math.sin(angle) * tip)
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = 3
+    ctx.lineCap = 'round'
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.arc(cx + Math.cos(angle) * tip, cy + Math.sin(angle) * tip, 3.2, 0, Math.PI * 2)
+    ctx.fillStyle = '#ffffff'
     ctx.fill()
-    ctx.strokeStyle = 'rgba(25,255,138,0.8)'
+    ctx.restore()
+
+    /* ---- center hub (mostly hidden behind the gear ring) ---- */
+    ctx.beginPath()
+    ctx.arc(cx, cy, 9, 0, Math.PI * 2)
+    ctx.fillStyle = '#051015'
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(0,229,255,0.85)'
     ctx.lineWidth = 2
     ctx.stroke()
 
-    // "RPM x1000" label
-    ctx.fillStyle = 'rgba(140,180,165,0.6)'
-    ctx.font = '600 8px "Segoe UI", sans-serif'
+    /* ---- small label ---- */
+    ctx.fillStyle = 'rgba(160,215,230,0.55)'
+    ctx.font = '700 9px "Segoe UI", Arial, sans-serif'
     ctx.textAlign = 'center'
-    ctx.fillText('RPM x1000', cx, cy + 44)
+    ctx.fillText('RPM ×1000', cx, cy + R * 0.46)
   }
 }
