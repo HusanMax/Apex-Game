@@ -45,7 +45,7 @@ hud.on('onAudio', (enabled) => audio.setEnabled(enabled))
 
 const DEFAULT_TRAFFIC = Number(document.getElementById('trafficDensity').value) || 6
 traffic.setDensity(DEFAULT_TRAFFIC)
-physics.setSteerSensitivity(Number(document.getElementById('steerSensitivity').value) || 1.2)
+physics.setSteerSensitivity(Number(document.getElementById('steerSensitivity').value) || 1.3)
 
 const startAudio = () => {
   audio.start()

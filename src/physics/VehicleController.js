@@ -20,9 +20,9 @@ export class VehicleController {
     this.a = 1.25            // CG -> front axle
     this.b = 1.35            // CG -> rear axle
     this.cgHeight = 0.42
-    this.Cf = 110000
+    this.Cf = 115000
     this.Cr = 106000
-    this.mu = 1.48
+    this.mu = 1.6
     this.wheelRadius = 0.38
 
     this.finalDrive = 3.60
@@ -37,9 +37,9 @@ export class VehicleController {
     this.rollResist = 0.013
     this.brakeForce = 24000
 
-    this.maxSteer = 0.62
-    this.steerSpeed = 7.0
-    this.steerSensitivity = 1.2
+    this.maxSteer = 0.65
+    this.steerSpeed = 9.0
+    this.steerSensitivity = 1.3
 
     /* ---------------- state ---------------- */
     this.X = 2                // start centred in the right-hand lane
@@ -160,10 +160,15 @@ export class VehicleController {
     // convention: positive steer = left, positive v = left, positive r = left
     const steerTarget = (this.input.left ? 1 : 0) + (this.input.right ? -1 : 0)
     const gripSteer = Math.atan((this.mu * G * this.wheelBase) / Math.max(speed * speed, 4))
-    let steerLimit = Math.min(this.maxSteer, gripSteer * 1.35)
+    let steerLimit = Math.min(this.maxSteer, gripSteer * 1.45)
     if (this.input.handbrake) steerLimit *= 1.5
     const desired = clamp(steerTarget * steerLimit * this.steerSensitivity, -this.maxSteer, this.maxSteer)
-    const response = this.steerSpeed * (1 - speedFactor * 0.3)
+    if (steerTarget !== 0 && this._lastSteer !== steerTarget && Math.abs(this.u) > 6 && !this.input.handbrake) {
+      const gripRate = (this.mu * 9.81) / Math.max(Math.abs(this.u), 5)
+      this.r += clamp(steerTarget * Math.min(0.2, gripRate * 0.4) * this.steerSensitivity, -0.26, 0.26)
+    }
+    this._lastSteer = steerTarget
+    const response = this.steerSpeed * (1 - speedFactor * 0.2)
     this.steerAngle += (desired - this.steerAngle) * Math.min(1, response * dt * 7)
 
     /* ---- gearbox & rpm ---- */
@@ -226,15 +231,15 @@ export class VehicleController {
     this.r += rDot * dt
 
     // light base damping keeps the car eager to rotate while weaving
-    this.v *= (1 - 0.42 * dt)
-    this.r *= (1 - 0.55 * dt)
+    this.v *= (1 - 0.35 * dt)
+    this.r *= (1 - 0.3 * dt)
 
     // stability management: catch the body before it slides out of line.
     // disabled while the handbrake is pulled so drifting still works.
     this.slip = Math.atan2(this.v, Math.max(Math.abs(this.u), 1))
-    this.stmActive = !this.input.handbrake && Math.abs(this.u) > 8 && Math.abs(this.slip) > 0.13
+    this.stmActive = !this.input.handbrake && Math.abs(this.u) > 8 && Math.abs(this.slip) > 0.15
     if (this.stmActive) {
-      const excess = Math.abs(this.slip) - 0.13
+      const excess = Math.abs(this.slip) - 0.15
       this.v *= 1 - Math.min(2.4, excess * 6) * dt
       this.r *= 1 - Math.min(1.4, excess * 4) * dt
     }
