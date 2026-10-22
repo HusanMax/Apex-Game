@@ -29,7 +29,7 @@ export class PlayerVehicle {
     this.speedKmh = 0
     this.rpm = 0
     this.gear = 1
-    this.maxSpeed = 260
+    this.maxSpeed = 420
 
     this.headlightsOn = true
     this.wheelSpinners = []
@@ -273,6 +273,60 @@ export class PlayerVehicle {
       pipe.position.set(sx, 0.38, 2.16)
       g.add(pipe)
     }
+
+    /* ---------------- driver (seen through the glass) ---------------- */
+    this._buildDriver(g)
+  }
+
+  _buildDriver(parent) {
+    const driver = new THREE.Group()
+    driver.name = 'Driver'
+
+    const suit = new THREE.MeshStandardMaterial({ color: 0x1c232c, roughness: 0.8 })
+    const accent = new THREE.MeshStandardMaterial({ color: 0xb01e26, roughness: 0.6 })
+    const skin = new THREE.MeshStandardMaterial({ color: 0xc98e63, roughness: 0.85 })
+    const helmetMat = new THREE.MeshStandardMaterial({ color: 0xeef2f6, roughness: 0.32, metalness: 0.15 })
+    const visorMat = new THREE.MeshStandardMaterial({
+      color: 0x07141c, roughness: 0.08, metalness: 0.9
+    })
+
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.3, 4, 10), suit)
+    torso.position.set(-0.34, 0.74, 0.18)
+    torso.scale.set(1.2, 1, 0.8)
+    driver.add(torso)
+
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.02), accent)
+    stripe.position.set(-0.34, 0.76, 0.05)
+    driver.add(stripe)
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.145, 16, 12), skin)
+    head.position.set(-0.34, 0.98, 0.1)
+    driver.add(head)
+
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.165, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.62), helmetMat)
+    helmet.position.set(-0.34, 0.99, 0.1)
+    driver.add(helmet)
+
+    const visor = new THREE.Mesh(new THREE.SphereGeometry(0.156, 18, 10, 0, Math.PI, Math.PI * 0.32, Math.PI * 0.3), visorMat)
+    visor.position.set(-0.34, 0.99, 0.1)
+    visor.rotation.y = 0
+    driver.add(visor)
+
+    for (const sx of [-0.5, -0.18]) {
+      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.3, 4, 8), suit)
+      arm.position.set(sx, 0.72, -0.14)
+      arm.rotation.x = -1.02
+      arm.rotation.z = sx < -0.34 ? -0.18 : 0.18
+      driver.add(arm)
+    }
+
+    const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 8, 22), new THREE.MeshStandardMaterial({ color: 0x0b0d10, roughness: 0.7 }))
+    wheel.position.set(-0.34, 0.7, -0.44)
+    wheel.rotation.x = -0.22
+    driver.add(wheel)
+
+    parent.add(driver)
+    this.effects.add(driver)
   }
 
   _applyTransform() {
