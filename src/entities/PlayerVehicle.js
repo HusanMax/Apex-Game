@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { buildVehicle } from './VehicleFactory.js'
 
-const PAINT = 0xe8ecf0        // satin pearl white (night)
-const PAINT_DAY = 0xb9c2cc    // cooler, non-glaring paint for daylight
+const glbCache = new Map()
 
 function makeGlowTexture() {
   const c = document.createElement('canvas')
@@ -17,8 +17,13 @@ function makeGlowTexture() {
   return new THREE.CanvasTexture(c)
 }
 
+/**
+ * Player vehicle: owns the transform, lights and wheel animation for whichever
+ * machine is currently selected in the garage. Body geometry comes from
+ * VehicleFactory; the Chevrolet Cobalt additionally loads its detailed GLB.
+ */
 export class PlayerVehicle {
-  constructor() {
+  constructor(spec) {
     this.group = new THREE.Group()
     this.group.name = 'PlayerVehicle'
     this.group.rotation.order = 'YXZ'
@@ -30,445 +35,300 @@ export class PlayerVehicle {
     this.speedKmh = 0
     this.rpm = 0
     this.gear = 1
-    this.maxSpeed = 420
 
     this.headlightsOn = true
-    this.wheelSpinners = []
+    this.wheels = []
     this.headlights = []
     this.lightShafts = []
     this.taillights = []
-
-    this.effects = new Set()
     this.paintMaterials = []
     this.glassMaterials = []
     this.model = null
-    this.modelLoaded = false
+    this.procedural = null
+    this._glbRoot = null
     this.dayMode = false
+    this.onModelLoaded = null
+    this.spec = null
 
-    this.build()
+    this.setVehicle(spec)
     this._applyTransform()
   }
 
-  build() {
-    const g = this.group
+  /* ------------------------------------------------------------ selection */
+  setVehicle(spec) {
+    this.spec = spec
+    this._clear()
 
-    /* ---------------- materials ---------------- */
-    const paint = new THREE.MeshPhysicalMaterial({
-      color: PAINT,
-      metalness: 0.0,
-      roughness: 0.62,
-      clearcoat: 0.1,
-      clearcoatRoughness: 0.6,
-      envMapIntensity: 0.16
-    })
-    this.paintMaterials.push(paint)
-    const carbon = new THREE.MeshStandardMaterial({ color: 0x0a0b0e, roughness: 0.42, metalness: 0.55 })
-    const glass = new THREE.MeshPhysicalMaterial({
-      color: 0x0a141b, metalness: 0.4, roughness: 0.06,
-      transparent: true, opacity: 0.72, clearcoat: 1, envMapIntensity: 1.6
-    })
-    const chrome = new THREE.MeshStandardMaterial({ color: 0xc6ced6, metalness: 1.0, roughness: 0.18 })
-    const tireMat = new THREE.MeshStandardMaterial({ color: 0x08090b, roughness: 0.9 })
-    const caliperMat = new THREE.MeshStandardMaterial({ color: 0xb01e26, emissive: 0x3a0508, roughness: 0.5 })
-    const redLight = new THREE.MeshStandardMaterial({ color: 0xff1a2a, emissive: 0xff1a2a, emissiveIntensity: 2.4 })
-    const whiteLight = new THREE.MeshBasicMaterial({ color: 0xffffff })
-    const headlightOff = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, emissive: 0x111111 })
-    const vinyl = new THREE.MeshStandardMaterial({ color: 0x1a1e24, roughness: 0.35, metalness: 0.5 })
-    this.headlightOnMat = whiteLight
-    this.headlightOffMat = headlightOff
+    const built = buildVehicle(spec)
+    this.procedural = built.root
+    this.group.add(built.root)
 
-    /* ---------------- body (extruded profile) ---------------- */
-    const shape = new THREE.Shape()
-    shape.moveTo(2.28, 0.34)
-    shape.lineTo(2.32, 0.60)
-    shape.lineTo(2.12, 0.76)
-    shape.lineTo(1.30, 0.82)
-    shape.lineTo(0.62, 0.98)
-    shape.lineTo(0.20, 1.42)
-    shape.lineTo(-0.50, 1.44)
-    shape.lineTo(-1.00, 1.05)
-    shape.lineTo(-1.70, 0.92)
-    shape.lineTo(-2.15, 0.74)
-    shape.lineTo(-2.28, 0.34)
-    shape.lineTo(2.28, 0.34)
+    this.wheels = built.wheels
+    this.headlights = built.headlights
+    this.lightShafts = built.shafts
+    this.taillights = built.taillights
+    this.paintMaterials = built.paintMaterials
+    this.glassMaterials = built.glassMaterials
+    this.headlightOnMat = built.headlightOnMat
+    this.headlightOffMat = built.headlightOffMat
+    this.wheelRadius = built.wheelRadius
 
-    const bodyGeo = new THREE.ExtrudeGeometry(shape, {
-      depth: 1.9, steps: 1, bevelEnabled: true,
-      bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 3
-    })
-    bodyGeo.translate(0, 0, -0.95)
-    const body = new THREE.Mesh(bodyGeo, paint)
-    body.rotation.y = Math.PI / 2
-    body.castShadow = true
-    body.receiveShadow = true
-    g.add(body)
-
-    /* ---------------- greenhouse glass ---------------- */
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.42, 1.75), glass)
-    canopy.position.set(0, 1.16, -0.12)
-    g.add(canopy)
-
-    // side windows strips
-    for (const sx of [-0.87, 0.87]) {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.34, 1.5), glass)
-      win.position.set(sx, 1.16, -0.12)
-      g.add(win)
+    // the overhead fill light has to outlive the procedural body: the Cobalt
+    // swaps in a GLB and hides the procedural root, and a light inside a hidden
+    // parent stops lighting the scene
+    const fill = built.root.children.find((c) => c.isPointLight) || null
+    if (fill) {
+      built.root.remove(fill)
+      this.group.add(fill)
     }
+    this.fillLight = fill
 
-    /* ---------------- widebody flares ---------------- */
-    const flareGeo = new THREE.BoxGeometry(0.32, 0.42, 1.15)
-    for (const z of [-1.45, 1.45]) {
-      for (const sx of [-1, 1]) {
-        const f = new THREE.Mesh(flareGeo, paint)
-        f.position.set(sx * 0.96, 0.62, z)
-        f.castShadow = true
-        g.add(f)
+    // same for the headlight beams: the Cobalt drives at night with the GLB,
+    // so its spotlights must not be switched off along with the hidden body
+    for (const hl of built.headlights) {
+      const light = hl?.light
+      if (!light) continue
+      light.parent?.remove(light)
+      this.group.add(light)
+      const target = light.target
+      if (target) {
+        target.parent?.remove(target)
+        this.group.add(target)
       }
     }
 
-    /* ---------------- skirts / splitter / mirrors ---------------- */
-    for (const sx of [-0.97, 0.97]) {
-      const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 2.7), carbon)
-      skirt.position.set(sx, 0.30, 0)
-      g.add(skirt)
-      const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.28), carbon)
-      mirror.position.set(sx * 1.02, 1.02, -0.55)
-      g.add(mirror)
+    this._applyLights()
+    this.setDayMode(this.dayMode)
+    // GLB is NOT loaded automatically — call loadModel() when ready
+    // (e.g. after the player clicks START in the garage)
+  }
+
+  /**
+   * Begin streaming the high-res GLB for the current vehicle (if any).
+   * Safe to call multiple times; subsequent calls are no-ops once the model
+   * is loading or already loaded.
+   */
+  loadModel() {
+    if (!this.spec?.model || this.spec.model.kind !== 'glb') return
+    // already attached or already downloading
+    if (this._glbRoot || this._glbLoading) return
+    this._glbLoading = true
+    this._loadGLB(this.spec.model.url)
+  }
+
+  _clear() {
+    const glb = this._glbRoot
+    for (const child of [...this.group.children]) {
+      this.group.remove(child)
+      // the GLB lives in glbCache and is reused, so it is detached but never
+      // disposed; the procedural body is rebuilt on every selection
+      if (child !== glb) this._disposeTree(child)
     }
+    this._glbRoot = null
+    this._glbLoading = false
+    this.procedural = null
+    this.model = null
+    this.wheels = []
+    this.headlights = []
+    this.lightShafts = []
+    this.taillights = []
+    this.paintMaterials = []
+    this.glassMaterials = []
+    this.fillLight = null
+  }
 
-    const splitter = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.10, 0.55), carbon)
-    splitter.position.set(0, 0.26, -2.22)
-    g.add(splitter)
-
-    const diffuser = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.16, 0.4), carbon)
-    diffuser.position.set(0, 0.28, 2.18)
-    g.add(diffuser)
-
-    /* ---------------- rear wing ---------------- */
-    const wing = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.10, 0.58), carbon)
-    wing.position.set(0, 1.52, 2.03)
-    wing.rotation.x = -0.12
-    wing.castShadow = true
-    g.add(wing)
-    for (const sx of [-0.78, 0.78]) {
-      const support = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.52, 0.30), carbon)
-      support.position.set(sx, 1.24, 2.03)
-      g.add(support)
-    }
-    // wing end plates
-    for (const sx of [-1.07, 1.07]) {
-      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.34, 0.62), carbon)
-      plate.position.set(sx, 1.52, 2.03)
-      g.add(plate)
-    }
-
-    /* ---------------- vinyl graphics ---------------- */
-    for (const sx of [-0.955, 0.955]) {
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.20, 1.55), vinyl)
-      stripe.position.set(sx, 0.80, 0.25)
-      g.add(stripe)
-      const stripe2 = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.08, 1.1), carbon)
-      stripe2.position.set(sx, 0.98, 0.35)
-      g.add(stripe2)
-    }
-
-    /* ---------------- wheels ---------------- */
-    const tireGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.30, 28)
-    tireGeo.rotateZ(Math.PI / 2)
-    const rimGeo = new THREE.CylinderGeometry(0.235, 0.235, 0.32, 22)
-    rimGeo.rotateZ(Math.PI / 2)
-    const spokeGeo = new THREE.BoxGeometry(0.05, 0.42, 0.055)
-    const caliperGeo = new THREE.BoxGeometry(0.10, 0.26, 0.20)
-
-    const wheelPositions = [
-      [-0.98, 0.38, -1.45],
-      [0.98, 0.38, -1.45],
-      [-0.98, 0.38, 1.45],
-      [0.98, 0.38, 1.45]
-    ]
-
-    for (const [x, y, z] of wheelPositions) {
-      const wheelGroup = new THREE.Group()
-      wheelGroup.position.set(x, y, z)
-
-      const spinner = new THREE.Group()
-
-      const tire = new THREE.Mesh(tireGeo, tireMat)
-      tire.castShadow = true
-      spinner.add(tire)
-
-      const rim = new THREE.Mesh(rimGeo, chrome)
-      spinner.add(rim)
-
-      for (let s = 0; s < 5; s++) {
-        const spoke = new THREE.Mesh(spokeGeo, chrome)
-        spoke.rotation.x = (s / 5) * Math.PI * 2
-        spinner.add(spoke)
+  _disposeTree(root) {
+    root.traverse((o) => {
+      if (o.geometry) o.geometry.dispose()
+      if (o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        for (const m of mats) m.dispose()
       }
-
-      // brake disc
-      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.20, 0.03, 20), chrome)
-      disc.rotation.z = Math.PI / 2
-      spinner.add(disc)
-
-      wheelGroup.add(spinner)
-
-      // glowing caliper (does not spin)
-      const caliper = new THREE.Mesh(caliperGeo, caliperMat)
-      caliper.position.set(x > 0 ? -0.12 : 0.12, 0, 0)
-      wheelGroup.add(caliper)
-
-      g.add(wheelGroup)
-      this.wheelSpinners.push(spinner)
-    }
-
-    /* ---------------- soft fill light ---------------- */
-    this.fillLight = new THREE.PointLight(0xe4f1ff, 9, 14, 2)
-    this.fillLight.position.set(0, 4.2, -0.4)
-    g.add(this.fillLight)
-    this.effects.add(this.fillLight)
-
-    /* ---------------- headlights + light shafts ---------------- */
-    const shaftMat = new THREE.MeshBasicMaterial({
-      color: 0xdfefff, transparent: true, opacity: 0.055,
-      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
     })
-    const shaftGeo = new THREE.ConeGeometry(1.7, 9.5, 18, 1, true)
-
-    for (const sx of [-0.68, 0.68]) {
-      const lens = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.10), headlightOff)
-      lens.position.set(sx, 0.70, -2.16)
-      g.add(lens)
-
-      const light = new THREE.SpotLight(0xdff0ff, 0, 90, Math.PI / 6.5, 0.45, 1.1)
-      light.position.set(sx, 0.70, -2.16)
-      light.target.position.set(sx, 0.2, -40)
-      light.castShadow = false
-      g.add(light)
-      g.add(light.target)
-      this.effects.add(light)
-      this.effects.add(light.target)
-
-      const shaft = new THREE.Mesh(shaftGeo, shaftMat.clone())
-      shaft.rotation.x = Math.PI / 2 + 0.1
-      shaft.position.set(sx, 0.68, -6.6)
-      shaft.visible = false
-      g.add(shaft)
-      this.effects.add(shaft)
-
-      this.headlights.push({ lens, light })
-      this.lightShafts.push(shaft)
-    }
-    for (const hl of this.headlights) hl.light.intensity = this.headlightsOn ? 9 : 0
-    for (const shaft of this.lightShafts) shaft.visible = this.headlightsOn && !this.modelLoaded
-
-    /* ---------------- taillights ---------------- */
-    for (const sx of [-0.70, 0.70]) {
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.16, 0.08), redLight)
-      tail.position.set(sx, 0.70, 2.17)
-      g.add(tail)
-      this.taillights.push(tail)
-    }
-
-    /* ---------------- exhaust ---------------- */
-    const pipeGeo = new THREE.CylinderGeometry(0.07, 0.08, 0.25, 12)
-    pipeGeo.rotateX(Math.PI / 2)
-    for (const sx of [-0.5, 0.5]) {
-      const pipe = new THREE.Mesh(pipeGeo, chrome)
-      pipe.position.set(sx, 0.38, 2.16)
-      g.add(pipe)
-    }
-
-    /* ---------------- driver (seen through the glass) ---------------- */
-    this._buildDriver(g)
-  }
-
-  _buildDriver(parent) {
-    const driver = new THREE.Group()
-    driver.name = 'Driver'
-
-    const suit = new THREE.MeshStandardMaterial({ color: 0x1c232c, roughness: 0.8 })
-    const accent = new THREE.MeshStandardMaterial({ color: 0xb01e26, roughness: 0.6 })
-    const skin = new THREE.MeshStandardMaterial({ color: 0xc98e63, roughness: 0.85 })
-    const helmetMat = new THREE.MeshStandardMaterial({ color: 0xeef2f6, roughness: 0.32, metalness: 0.15 })
-    const visorMat = new THREE.MeshStandardMaterial({
-      color: 0x07141c, roughness: 0.08, metalness: 0.9
-    })
-
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.3, 4, 10), suit)
-    torso.position.set(-0.34, 0.74, 0.18)
-    torso.scale.set(1.2, 1, 0.8)
-    driver.add(torso)
-
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.02), accent)
-    stripe.position.set(-0.34, 0.76, 0.05)
-    driver.add(stripe)
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.145, 16, 12), skin)
-    head.position.set(-0.34, 0.98, 0.1)
-    driver.add(head)
-
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.165, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.62), helmetMat)
-    helmet.position.set(-0.34, 0.99, 0.1)
-    driver.add(helmet)
-
-    const visor = new THREE.Mesh(new THREE.SphereGeometry(0.156, 18, 10, 0, Math.PI, Math.PI * 0.32, Math.PI * 0.3), visorMat)
-    visor.position.set(-0.34, 0.99, 0.1)
-    visor.rotation.y = 0
-    driver.add(visor)
-
-    for (const sx of [-0.5, -0.18]) {
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.3, 4, 8), suit)
-      arm.position.set(sx, 0.72, -0.14)
-      arm.rotation.x = -1.02
-      arm.rotation.z = sx < -0.34 ? -0.18 : 0.18
-      driver.add(arm)
-    }
-
-    const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 8, 22), new THREE.MeshStandardMaterial({ color: 0x0b0d10, roughness: 0.7 }))
-    wheel.position.set(-0.34, 0.7, -0.44)
-    wheel.rotation.x = -0.22
-    driver.add(wheel)
-
-    parent.add(driver)
-    this.effects.add(driver)
-  }
-
-  _applyTransform() {
-    this.group.position.copy(this.position)
-    this.group.rotation.set(this.bodyPitch, this.rotationY, this.bodyRoll)
   }
 
   /* ------------------------------------------------------------- GLB model */
-  loadModel(url, onLoaded) {
+  _loadGLB(url) {
+    const cached = glbCache.get(url)
+    if (cached) {
+      this._useGLB(cached)
+      return
+    }
+
     const loader = new GLTFLoader()
     loader.load(
       url,
       (gltf) => {
         const root = gltf.scene
         root.updateMatrixWorld(true)
-
         this._dedupeWheelLods(root)
         this._normalizeModel(root)
-
-        root.traverse((o) => {
-          if (!o.isMesh) return
-          const mats = Array.isArray(o.material) ? o.material : [o.material]
-          const matName = (mats[0]?.name || '').toLowerCase()
-
-          // only the outer shell needs to cast shadows (perf)
-          o.castShadow = matName === 'primary' || matName.includes('roda')
-          o.receiveShadow = true
-          o.frustumCulled = false
-
-          for (const m of mats) {
-            if (!m) continue
-            if ('envMapIntensity' in m) m.envMapIntensity = 1.35
-            if (m.map) m.map.anisotropy = 4
-            const name = (m.name || '').toLowerCase()
-            if (/glass|windscreen/.test((o.name || '').toLowerCase())) {
-              // tame blown-out reflections on the windows
-              m.roughness = Math.max(m.roughness ?? 0.2, 0.34)
-              m.metalness = Math.min(m.metalness ?? 0, 0.25)
-              if ('envMapIntensity' in m) m.envMapIntensity = 0.28
-              if (!this.glassMaterials.includes(m)) this.glassMaterials.push(m)
-            }
-            if (name === 'primary') {
-              // flat satin paint: no metallic glints
-              m.color.setHex(PAINT)
-              m.metalness = 0.0
-              m.roughness = 0.62
-              m.clearcoat = 0.1
-              m.clearcoatRoughness = 0.6
-              if ('envMapIntensity' in m) m.envMapIntensity = 0.16
-              if (!this.paintMaterials.includes(m)) this.paintMaterials.push(m)
-            } else if (name.includes('front_light')) {
-              m.color.setHex(0xffffff)
-              if (m.emissive) { m.emissive.setHex(0xffffff); m.emissiveIntensity = 1.6 }
-            } else if (name.includes('rear_light')) {
-              m.color.setHex(0x330000)
-              if (m.emissive) { m.emissive.setHex(0xff0505); m.emissiveIntensity = 1.2 }
-            }
-          }
-        })
-
-        // the raw GLB lenses are dark; add emissive glow panels for the lamps
-        root.updateMatrixWorld(true)
-        const glowTex = makeGlowTexture()
-        const meshes = []
-        root.traverse((o) => { if (o.isMesh && o.geometry) meshes.push(o) })
-
-        const lampSpecs = [
-          { re: /ascende_(left|right)/i, kind: 'rear', color: 0xff0a0a, light: 0xff1010 },
-          { re: /fara_(left|right)/i, kind: 'front', color: 0xf2fbff, light: 0xdfefff }
-        ]
-
-        for (const spec of lampSpecs) {
-          for (const o of meshes) {
-            if (!spec.re.test(o.name || '')) continue
-            o.geometry.computeBoundingBox()
-            const bb = o.geometry.boundingBox
-            if (!bb) continue
-
-            const corners = []
-            for (const x of [bb.min.x, bb.max.x]) {
-              for (const y of [bb.min.y, bb.max.y]) {
-                for (const z of [bb.min.z, bb.max.z]) {
-                  corners.push(root.worldToLocal(new THREE.Vector3(x, y, z).applyMatrix4(o.matrixWorld)))
-                }
-              }
-            }
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity
-            for (const c of corners) {
-              minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x)
-              minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y)
-              minZ = Math.min(minZ, c.z); maxZ = Math.max(maxZ, c.z)
-            }
-
-            const cx = (minX + maxX) / 2
-            const cy = (minY + maxY) / 2
-            const w = Math.min(Math.max((maxX - minX) * 1.1, 0.3), 0.85)
-            const h = Math.min(Math.max((maxY - minY) * 1.1, 0.16), 0.5)
-            const zPlane = spec.kind === 'rear' ? maxZ + 0.02 : minZ - 0.02
-
-            const panel = new THREE.Mesh(
-              new THREE.PlaneGeometry(w, h),
-              new THREE.MeshBasicMaterial({
-                map: glowTex, color: spec.color, transparent: true, opacity: 0.45,
-                blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
-              })
-            )
-            panel.position.set(cx, cy, zPlane)
-            panel.renderOrder = 2
-            root.add(panel)
-
-            const lamp = new THREE.PointLight(spec.light, spec.kind === 'rear' ? 1.2 : 1.2, 3.5, 2)
-            lamp.position.set(cx, cy, zPlane + (spec.kind === 'rear' ? 0.1 : -0.1))
-            root.add(lamp)
-          }
+        glbCache.set(url, root)
+        // the player may already have picked another machine while this
+        // downloaded — only attach the model if it is still the selection
+        if (this.spec?.model?.url === url) {
+          this._useGLB(root)
+          this.onModelLoaded?.(root)
         }
-
-        this.model = root
-        this.group.add(root)
-        this.modelLoaded = true
-        this.setDayMode(this.dayMode)
-        this._hideProcedural()
-        for (const shaft of this.lightShafts) shaft.visible = false
-        onLoaded?.(root)
       },
       undefined,
       (err) => {
-        console.error('[PlayerVehicle] Failed to load GLB:', err)
+        console.error('[PlayerVehicle] Failed to load GLB, keeping procedural body:', err)
       }
     )
   }
 
+  _useGLB(root) {
+    if (this._glbRoot && this._glbRoot.parent === this.group) this.group.remove(this._glbRoot)
+    this._glbRoot = root
+    this.group.add(root)
+    this.model = root
+    // materials are registered every time, so paint/day-mode applies even when
+    // the model comes back from the cache after another machine was selected
+    this._registerGLBMaterials(root)
+    this._prepareGLB(root)
+    if (this.procedural) this.procedural.visible = false
+    for (const shaft of this.lightShafts) shaft.visible = false
+    this._applyLights()
+    this.setDayMode(this.dayMode)
+    // keep the cache bounded: a player who arrows through the whole garage would
+    // otherwise pin every GLB (some 45 MB) in VRAM forever.  The model that is
+    // on screen right now is never a candidate for eviction.
+    this._evictGLBCache()
+  }
+
+  /** Drop the oldest cached GLBs that are not the one currently on screen. */
+  _evictGLBCache() {
+    const CAP = 8
+    if (glbCache.size <= CAP) return
+    for (const [url, root] of glbCache) {
+      if (root === this._glbRoot) continue
+      if (root.parent === this.group) continue
+      glbCache.delete(url)
+      this._disposeTree(root)
+      if (glbCache.size <= CAP) break
+    }
+  }
+
+  _registerGLBMaterials(root) {
+    root.traverse((o) => {
+      if (!o.isMesh) return
+      const mats = Array.isArray(o.material) ? o.material : [o.material]
+      for (const m of mats) {
+        if (!m) continue
+        const name = (m.name || '').toLowerCase()
+        if (/glass|windscreen/.test((o.name || '').toLowerCase())) {
+          if (!this.glassMaterials.includes(m)) this.glassMaterials.push(m)
+        }
+        if (name === 'primary' && !this.paintMaterials.includes(m)) {
+          this.paintMaterials.push(m)
+        }
+      }
+    })
+  }
+
+  _prepareGLB(root) {
+    root.traverse((o) => {
+      if (!o.isMesh) return
+      const mats = Array.isArray(o.material) ? o.material : [o.material]
+      const matName = (mats[0]?.name || '').toLowerCase()
+
+      // only the outer shell needs to cast shadows (perf)
+      o.castShadow = matName === 'primary' || matName.includes('roda')
+      o.receiveShadow = true
+      o.frustumCulled = false
+
+      for (const m of mats) {
+        if (!m) continue
+        if ('envMapIntensity' in m) m.envMapIntensity = 1.35
+        if (m.map) m.map.anisotropy = 4
+        const name = (m.name || '').toLowerCase()
+        if (/glass|windscreen/.test((o.name || '').toLowerCase())) {
+          m.roughness = Math.max(m.roughness ?? 0.2, 0.34)
+          m.metalness = Math.min(m.metalness ?? 0, 0.25)
+          if ('envMapIntensity' in m) m.envMapIntensity = 0.28
+        }
+        if (name === 'primary') {
+          m.color.setHex(this.spec.paint)
+          m.metalness = 0.0
+          m.roughness = 0.55
+          m.clearcoat = 0.3
+          m.clearcoatRoughness = 0.4
+          if ('envMapIntensity' in m) m.envMapIntensity = 0.35
+        } else if (name.includes('front_light')) {
+          m.color.setHex(0xffffff)
+          if (m.emissive) { m.emissive.setHex(0xffffff); m.emissiveIntensity = 1.6 }
+        } else if (name.includes('rear_light')) {
+          m.color.setHex(0x330000)
+          if (m.emissive) { m.emissive.setHex(0xff0505); m.emissiveIntensity = 1.2 }
+        }
+      }
+    })
+
+    if (root.userData.lampPanels) return
+    root.userData.lampPanels = true
+
+    root.updateMatrixWorld(true)
+    const glowTex = makeGlowTexture()
+    const meshes = []
+    root.traverse((o) => { if (o.isMesh && o.geometry) meshes.push(o) })
+
+    const lampSpecs = [
+      { re: /ascende_(left|right)/i, kind: 'rear', color: 0xff0a0a, light: 0xff1010 },
+      { re: /fara_(left|right)/i, kind: 'front', color: 0xf2fbff, light: 0xdfefff }
+    ]
+
+    for (const spec of lampSpecs) {
+      for (const o of meshes) {
+        if (!spec.re.test(o.name || '')) continue
+        o.geometry.computeBoundingBox()
+        const bb = o.geometry.boundingBox
+        if (!bb) continue
+
+        const corners = []
+        for (const x of [bb.min.x, bb.max.x]) {
+          for (const y of [bb.min.y, bb.max.y]) {
+            for (const z of [bb.min.z, bb.max.z]) {
+              corners.push(root.worldToLocal(new THREE.Vector3(x, y, z).applyMatrix4(o.matrixWorld)))
+            }
+          }
+        }
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity
+        for (const c of corners) {
+          minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x)
+          minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y)
+          minZ = Math.min(minZ, c.z); maxZ = Math.max(maxZ, c.z)
+        }
+
+        const cx = (minX + maxX) / 2
+        const cy = (minY + maxY) / 2
+        const w = Math.min(Math.max((maxX - minX) * 1.1, 0.3), 0.85)
+        const h = Math.min(Math.max((maxY - minY) * 1.1, 0.16), 0.5)
+        const zPlane = spec.kind === 'rear' ? maxZ + 0.02 : minZ - 0.02
+
+        const panel = new THREE.Mesh(
+          new THREE.PlaneGeometry(w, h),
+          new THREE.MeshBasicMaterial({
+            map: glowTex, color: spec.color, transparent: true, opacity: 0.45,
+            blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+          })
+        )
+        panel.position.set(cx, cy, zPlane)
+        panel.renderOrder = 2
+        root.add(panel)
+
+        const lamp = new THREE.PointLight(spec.light, 1.2, 3.5, 2)
+        lamp.position.set(cx, cy, zPlane + (spec.kind === 'rear' ? 0.1 : -0.1))
+        root.add(lamp)
+      }
+    }
+  }
+
   _normalizeModel(root) {
-    let box = new THREE.Box3().setFromObject(root)
+    const box = new THREE.Box3().setFromObject(root)
     const size = new THREE.Vector3()
     box.getSize(size)
 
-    // make the longest horizontal axis the car length (Z)
     if (size.x > size.z) {
       root.rotation.y += Math.PI / 2
       root.updateMatrixWorld(true)
@@ -476,23 +336,24 @@ export class PlayerVehicle {
       box.getSize(size)
     }
 
-    // detect the front using the "wheel_rf" dummy; front must point toward -Z
-    let frontZ = null
-    root.traverse((o) => {
-      if (frontZ === null && /wheel_rf/i.test(o.name || '')) {
-        const p = new THREE.Vector3()
-        o.getWorldPosition(p)
-        frontZ = p.z
-      }
-    })
-    if (frontZ !== null && frontZ > 0) {
+    // The simulator always drives toward -Z, so the car's nose must point that
+    // way.  A per-model `flip` override wins (set when an export faces the wrong
+    // way and auto-detection cannot tell); otherwise we infer the front from
+    // wheel / lamp naming.  If nothing is labelled we default to flipping, since
+    // most of these GLB exports ship facing +Z and need to be turned to -Z.
+    const explicitFlip = this.spec?.model?.flip
+    let needsFlip
+    if (explicitFlip === true) needsFlip = true
+    else if (explicitFlip === false) needsFlip = false
+    else needsFlip = this._frontFacesPlusZ(root)
+
+    if (needsFlip) {
       root.rotation.y += Math.PI
       root.updateMatrixWorld(true)
       box.setFromObject(root)
       box.getSize(size)
     }
 
-    // uniform scale to ~4.4 m length
     const scale = 4.4 / Math.max(size.z, 0.001)
     root.scale.multiplyScalar(scale)
     root.updateMatrixWorld(true)
@@ -504,6 +365,43 @@ export class PlayerVehicle {
     root.position.z -= center.z
     root.position.y -= box.min.y
     root.updateMatrixWorld(true)
+  }
+
+  /** True if the model's front (by wheel/lamp naming) currently points +Z. */
+  _frontFacesPlusZ(root) {
+    const frontWheels = []
+    const rearWheels = []
+    let lampZ = null
+    root.traverse((o) => {
+      const n = (o.name || '').toLowerCase()
+      if (/wheel|tire|tyre/.test(n)) {
+        // classify front vs rear by the letter near the axle slot.  Names like
+        // wheel_fl / wheel_fr / wheel_rf / wheel_lf are front; wheel_rl / wheel_rr
+        // / wheel_rb are rear.  A plain "wheel" with no slot falls through.
+        const isFront = /(^|[_-])(f|fl|fr|lf|rf|front)([_-]|$)/.test(n)
+        const isRear = /(^|[_-])(r|rl|rr|lr|rb|rear)([_-]|$)/.test(n)
+        if (isFront || isRear) {
+          const p = new THREE.Vector3()
+          o.getWorldPosition(p)
+          ;(isFront ? frontWheels : rearWheels).push(p.z)
+        }
+      } else if (lampZ === null && /fara|head|front_light/.test(n)) {
+        const p = new THREE.Vector3()
+        o.getWorldPosition(p)
+        lampZ = p.z
+      }
+    })
+    if (frontWheels.length && rearWheels.length) {
+      const fz = frontWheels.reduce((a, b) => a + b, 0) / frontWheels.length
+      const rz = rearWheels.reduce((a, b) => a + b, 0) / rearWheels.length
+      return fz > rz
+    }
+    // no clear wheel labels: fall back to front-lamp position if the model has
+    // named headlights; otherwise, since most of these exports ship facing +Z
+    // (nose toward the camera) and were previously never corrected, default to
+    // flipping the model to face -Z (the direction the sim actually drives).
+    if (lampZ !== null) return lampZ > 0
+    return true
   }
 
   _dedupeWheelLods(root) {
@@ -540,11 +438,20 @@ export class PlayerVehicle {
     }
   }
 
-  _hideProcedural() {
-    for (const child of this.group.children) {
-      if (child === this.model) continue
-      if (!this.effects.has(child)) child.visible = false
+  /* --------------------------------------------------------------- visuals */
+  _applyTransform() {
+    this.group.position.copy(this.position)
+    this.group.rotation.set(this.bodyPitch, this.rotationY, this.bodyRoll)
+  }
+
+  _applyLights() {
+    const intensity = this.spec?.type === 'bike' ? 6 : 9
+    for (const hl of this.headlights) {
+      hl.light.intensity = this.headlightsOn ? intensity : 0
+      hl.lens.material = this.headlightsOn ? this.headlightOnMat : this.headlightOffMat
     }
+    const shaftsOn = this.headlightsOn && !this._glbRoot
+    for (const shaft of this.lightShafts) shaft.visible = shaftsOn
   }
 
   setPosition(x, y, z, rotationY) {
@@ -559,32 +466,50 @@ export class PlayerVehicle {
     this._applyTransform()
   }
 
-  spinWheels(speed) {
-    const delta = (speed * 0.06)
-    for (const s of this.wheelSpinners) s.rotation.x -= delta
+  spinWheels(dt, speed) {
+    // physical rolling: angular speed = linear speed / tyre radius
+    const delta = (speed * dt) / Math.max(this.wheelRadius || 0.35, 0.05)
+    for (const w of this.wheels) {
+      const spinner = w?.spinner || w
+      if (spinner) spinner.rotation.x -= delta
+    }
+  }
+
+  /** Turn the front wheels with the steering wheel (cosmetic only). */
+  setSteerAngle(angle) {
+    for (const w of this.wheels) {
+      if (!w?.front) continue
+      // steer the hub, not the axle group: the rolling spinner inside it keeps
+      // its own rotation, and the caliper stays bolted to the upright
+      const pivot = w.hub || w.group
+      if (pivot) pivot.rotation.y = angle
+    }
   }
 
   toggleHeadlights() {
     this.headlightsOn = !this.headlightsOn
-    for (const hl of this.headlights) {
-      hl.light.intensity = this.headlightsOn ? 9 : 0
-      hl.lens.material = this.headlightsOn ? this.headlightOnMat : this.headlightOffMat
-    }
-    for (const shaft of this.lightShafts) shaft.visible = this.headlightsOn && !this.modelLoaded
+    this._applyLights()
     return this.headlightsOn
   }
 
   setDayMode(isDay) {
     this.dayMode = isDay
 
-    const paintColor = isDay ? PAINT_DAY : PAINT
+    // daylight washes the paint out a little, but every machine keeps its own
+    // colour — only the reflections are tamed (no more grey-everything bug)
+    const base = this.spec?.paint ?? 0xe8ecf0
+    const dayPaint = this.spec?.dayPaint ??
+      new THREE.Color(base).lerp(new THREE.Color(0xffffff), 0.12).getHex()
+
     for (const m of this.paintMaterials) {
-      m.color.setHex(paintColor)
-      m.metalness = 0
-      m.roughness = isDay ? 0.82 : 0.62
-      m.clearcoat = isDay ? 0.0 : 0.1
-      m.clearcoatRoughness = isDay ? 1.0 : 0.6
-      if ('envMapIntensity' in m) m.envMapIntensity = isDay ? 0.06 : 0.16
+      m.color.setHex(isDay ? dayPaint : base)
+      if ('metalness' in m) m.metalness = isDay ? Math.min(m.metalness ?? 0, 0.1) : (this.spec?.type === 'bike' ? 0.5 : 0.05)
+      m.roughness = isDay ? 0.72 : 0.45
+      if ('clearcoat' in m) {
+        m.clearcoat = isDay ? 0.05 : 0.4
+        m.clearcoatRoughness = isDay ? 1.0 : 0.35
+      }
+      if ('envMapIntensity' in m) m.envMapIntensity = isDay ? 0.08 : 0.55
       m.needsUpdate = true
     }
 
@@ -594,27 +519,27 @@ export class PlayerVehicle {
       m.needsUpdate = true
     }
 
-    // the overhead fill light makes the paint bloom in daylight
-    if (this.fillLight) this.fillLight.intensity = isDay ? 1.2 : 9
+    if (this.fillLight) this.fillLight.intensity = isDay ? 1.2 : (this.spec?.type === 'bike' ? 5 : 9)
   }
 
-  setNitroColor(active, boostIntensity = 1) {
-    if (this.taillights.length) {
-      for (const t of this.taillights) t.material.emissiveIntensity = active ? 3.4 : 2.4
+  setNitroColor(active) {
+    for (const t of this.taillights) {
+      if (t.material?.emissiveIntensity !== undefined) {
+        t.material.emissiveIntensity = active ? 3.4 : 2.4
+      }
     }
   }
 
   update(dt, speed) {
-    this.spinWheels(speed)
+    this.spinWheels(dt, speed)
   }
 
   dispose() {
-    this.group.traverse((o) => {
-      if (o.geometry) o.geometry.dispose()
-      if (o.material) {
-        const mats = Array.isArray(o.material) ? o.material : [o.material]
-        for (const m of mats) m.dispose()
-      }
-    })
+    const keep = this._glbRoot
+    for (const child of [...this.group.children]) {
+      this.group.remove(child)
+      if (child !== keep) this._disposeTree(child)
+    }
+    this._glbRoot = null
   }
 }

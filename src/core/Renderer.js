@@ -93,7 +93,7 @@ export class Renderer {
   setSize(width, height) {
     this.renderer.setSize(width, height)
     this.composer.setSize(width, height)
-    if (this.bloomPass) this.bloomPass.size.set(width, height)
+    if (this.bloomPass?.setSize) this.bloomPass.setSize(width, height)
     if (this.camera) {
       this.camera.aspect = width / height
       this.camera.updateProjectionMatrix()
@@ -101,13 +101,15 @@ export class Renderer {
   }
 
   setSpeedEffects(dt, { nitroActive, speedFactor }) {
-    // gentle, stable radial blur (no colour shifting)
+    // gentle, stable radial blur (no colour shifting).  Exponential smoothing so
+    // the effect settles at the same rate whatever the frame rate is doing.
+    const ease = (rate) => 1 - Math.exp(-rate * dt)
     const target = nitroActive ? 0.20 : speedFactor * 0.02
-    this._radialTarget += (target - this._radialTarget) * Math.min(1, dt * 6)
+    this._radialTarget += (target - this._radialTarget) * ease(6)
     this.radialPass.uniforms.strength.value = this._radialTarget
 
     const bloomTarget = nitroActive ? 0.9 : 0.42
-    this.bloomPass.strength += (bloomTarget - this.bloomPass.strength) * Math.min(1, dt * 4)
+    this.bloomPass.strength += (bloomTarget - this.bloomPass.strength) * ease(4)
   }
 
   render() {

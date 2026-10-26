@@ -22,7 +22,11 @@
       color: var(--text);
     }
     #canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-    #hud { position: absolute; inset: 0; pointer-events: none; user-select: none; }
+    #hud { position: absolute; inset: 0; pointer-events: none; user-select: none; transition: opacity .3s; }
+    body.garage-open #hud { opacity: 0; }
+    /* the invisible HUD must not swallow clicks meant for the garage */
+    body.garage-open .settings-wrap,
+    body.garage-open .garage-btn { pointer-events: none; }
 
     /* ---------------- Forza Horizon style cluster ---------------- */
     .speedo-wrap {
@@ -155,18 +159,216 @@
     .hint { margin-top: 14px; font-size: 11px; line-height: 1.7; color: var(--muted); border-top: 1px solid var(--panel-border); padding-top: 10px; }
     .hint b { color: var(--text); }
 
+    /* ---------------- Radio ---------------- */
+    .radio-hud {
+      position: absolute; left: 22px; bottom: 54px;
+      display: flex; align-items: center; gap: 10px;
+      padding: 7px 11px 7px 9px; border-radius: 9px;
+      background: rgba(5,9,13,0.55); border: 1px solid rgba(25,255,138,0.14);
+      backdrop-filter: blur(8px); transition: opacity .2s;
+    }
+    .radio-hud.off { opacity: 0.42; }
+    .radio-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+    .radio-hud.off .radio-dot { background: #46564e; box-shadow: none; }
+    .radio-station { font-size: 11px; letter-spacing: 2px; font-weight: 800; color: var(--text); }
+    .radio-genre { margin-top: 2px; font-size: 9px; letter-spacing: 2px; color: var(--muted); }
+    .radio-key {
+      font-size: 9px; font-weight: 800; letter-spacing: 1px; color: var(--muted);
+      border: 1px solid var(--panel-border); border-radius: 4px; padding: 3px 5px;
+    }
+
     .brand {
       position: absolute; bottom: 22px; left: 22px;
       font-size: 11px; letter-spacing: 4px; color: var(--muted);
     }
     .brand span { color: var(--accent); }
 
+    .garage-btn {
+      position: absolute; bottom: 102px; left: 22px;
+      pointer-events: auto; cursor: pointer;
+      background: rgba(5,9,13,0.6); border: 1px solid var(--panel-border);
+      color: var(--text); border-radius: 8px; padding: 9px 14px;
+      font-size: 10px; font-weight: 800; letter-spacing: 3px;
+      transition: border-color .2s, box-shadow .2s, color .2s;
+    }
+    .garage-btn:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 20px var(--accent-glow); }
+
     #loading {
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       background: #04060a; color: var(--accent); font-size: 13px; letter-spacing: 5px;
-      transition: opacity .5s; z-index: 50;
+      z-index: 50;
+      animation: loadingFadeOut 0.6s ease 0.3s forwards;
     }
-    #loading.hidden { opacity: 0; pointer-events: none; }
+    @keyframes loadingFadeOut {
+      to { opacity: 0; pointer-events: none; visibility: hidden; }
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; visibility: hidden; }
+
+    /* ================================================================ GARAGE */
+    .garage {
+      position: absolute; inset: 0; z-index: 40;
+      display: flex;
+      background:
+        radial-gradient(ellipse at 78% 45%, rgba(0,0,0,0) 0%, rgba(2,4,7,0.1) 55%, rgba(2,4,7,0.55) 100%),
+        linear-gradient(90deg, rgba(3,6,9,0.96) 0%, rgba(3,6,9,0.9) 38%, rgba(3,6,9,0.35) 58%, rgba(3,6,9,0) 76%);
+      transition: opacity .35s ease;
+    }
+    .garage.hidden { opacity: 0; pointer-events: none; }
+    .garage-left {
+      width: min(700px, 50vw); height: 100%;
+      display: flex; flex-direction: column; gap: 12px;
+      padding: 26px 26px 22px 28px;
+      border-right: 1px solid rgba(25,255,138,0.08);
+    }
+    .garage-head { flex: 0 0 auto; }
+    .garage-kicker {
+      font-size: 10px; letter-spacing: 4px; color: var(--muted); margin-bottom: 8px;
+    }
+    .garage-kicker span { color: var(--accent); }
+    .garage-head h1 {
+      font-size: 26px; font-weight: 900; letter-spacing: 2px; line-height: 1.05;
+      text-transform: uppercase;
+    }
+    .garage-head h1 em {
+      font-style: normal; color: var(--accent);
+      text-shadow: 0 0 24px rgba(25,255,138,0.45);
+    }
+    .garage-close {
+      position: absolute; top: 24px; left: calc(min(700px, 50vw) - 42px);
+      width: 26px; height: 26px; border-radius: 50%;
+      background: rgba(8,11,16,0.8); border: 1px solid var(--panel-border);
+      color: var(--muted); font-size: 12px; cursor: pointer; display: none;
+    }
+    #garage.started .garage-close { display: block; }
+    .garage-close:hover { color: var(--accent); border-color: var(--accent); }
+    .garage-tabs { display: flex; gap: 6px; margin-top: 14px; }
+    .garage-tabs button {
+      flex: 1; padding: 7px 9px; border-radius: 6px; cursor: pointer;
+      background: rgba(8,11,16,0.5); border: 1px solid rgba(25,255,138,0.15);
+      color: var(--muted); font-size: 9px; letter-spacing: 2px; font-weight: 800;
+      transition: all .18s;
+    }
+    .garage-tabs button:hover { color: var(--text); border-color: rgba(25,255,138,0.4); }
+    .garage-tabs button.active {
+      color: #04120b; background: var(--accent); border-color: var(--accent);
+      box-shadow: 0 0 18px rgba(25,255,138,0.35);
+    }
+
+    .garage-list {
+      flex: 1 1 42%; min-height: 150px; overflow-y: auto; padding-right: 4px;
+      display: flex; flex-direction: column; gap: 7px;
+      scrollbar-width: thin; scrollbar-color: rgba(25,255,138,0.35) transparent;
+    }
+    .garage-list::-webkit-scrollbar { width: 5px; }
+    .garage-list::-webkit-scrollbar-thumb { background: rgba(25,255,138,0.3); border-radius: 3px; }
+
+    .veh-card {
+      display: flex; align-items: center; gap: 12px; width: 100%;
+      padding: 10px 12px; border-radius: 9px; cursor: pointer; text-align: left;
+      background: rgba(7,10,14,0.72);
+      border: 1px solid rgba(140,180,160,0.13);
+      color: var(--text);
+      font: inherit;
+      transition: border-color .15s, background .15s, transform .15s;
+      flex: 0 0 auto;
+    }
+    .veh-card:hover {
+      border-color: rgba(25,255,138,0.4); background: rgba(11,18,16,0.9);
+      transform: translateX(3px);
+    }
+    .veh-card.selected {
+      border-color: var(--accent); background: linear-gradient(90deg, rgba(25,255,138,0.14), rgba(9,16,16,0.9));
+      box-shadow: 0 0 24px rgba(25,255,138,0.1), inset 2px 0 0 var(--accent);
+    }
+    .veh-icon { width: 52px; flex: 0 0 52px; color: var(--muted); opacity: 0.8; }
+    .veh-card.selected .veh-icon { color: var(--accent); opacity: 1; }
+    .veh-icon svg { width: 100%; height: auto; display: block; }
+    .veh-main { flex: 1 1 auto; min-width: 0; }
+    .veh-badge {
+      display: block; font-size: 8px; letter-spacing: 1.8px; color: var(--muted);
+      margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .veh-card.selected .veh-badge { color: var(--accent); }
+    .veh-name {
+      display: block; font-size: 14px; font-weight: 800; letter-spacing: 0.2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .veh-sub { display: block; margin-top: 3px; font-size: 10px; color: var(--muted); }
+    .veh-speed { text-align: right; flex: 0 0 auto; }
+    .veh-speed b {
+      display: block; font-size: 19px; font-weight: 900; font-style: italic;
+      color: #ffffff; line-height: 1;
+    }
+    .veh-card.selected .veh-speed b { color: var(--accent); text-shadow: 0 0 14px rgba(25,255,138,0.5); }
+    .veh-speed i { display: block; font-style: normal; font-size: 8px; letter-spacing: 1.5px; color: var(--muted); margin-top: 3px; }
+
+    .garage-spec {
+      flex: 1 1 46%; min-height: 0; overflow-y: auto; padding-right: 6px;
+      border-top: 1px solid rgba(25,255,138,0.12); padding-top: 14px;
+      scrollbar-width: thin; scrollbar-color: rgba(25,255,138,0.35) transparent;
+    }
+    .garage-spec::-webkit-scrollbar { width: 5px; }
+    .garage-spec::-webkit-scrollbar-thumb { background: rgba(25,255,138,0.3); border-radius: 3px; }
+    .spec-badge { font-size: 9px; letter-spacing: 2.5px; color: var(--accent); margin-bottom: 6px; }
+    .spec-head h2 { font-size: 21px; font-weight: 900; letter-spacing: 0.5px; }
+    .spec-tagline { margin-top: 6px; font-size: 11px; line-height: 1.55; color: var(--muted); }
+    .spec-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px;
+      margin: 14px 0 12px;
+    }
+    .spec-grid > div {
+      display: flex; justify-content: space-between; gap: 8px;
+      font-size: 10px; padding-bottom: 4px; border-bottom: 1px solid rgba(140,180,160,0.1);
+    }
+    .spec-grid span { color: var(--muted); letter-spacing: 1.2px; }
+    .spec-grid b { font-weight: 700; color: var(--text); text-align: right; }
+
+    .spec-stats { display: flex; flex-direction: column; gap: 8px; }
+    .stat-head { display: flex; justify-content: space-between; font-size: 9px; letter-spacing: 1.6px; color: var(--muted); }
+    .stat-head b { color: var(--text); }
+    .stat-track {
+      margin-top: 4px; height: 4px; border-radius: 3px; overflow: hidden;
+      background: rgba(140,180,160,0.12);
+    }
+    .stat-track i {
+      display: block; height: 100%;
+      background: linear-gradient(90deg, var(--accent-2), var(--accent));
+      box-shadow: 0 0 12px rgba(25,255,138,0.5);
+    }
+    .spec-sound {
+      margin-top: 12px; padding-top: 10px;
+      border-top: 1px solid rgba(25,255,138,0.12);
+    }
+    .spec-sound span { font-size: 9px; letter-spacing: 2px; color: var(--accent); }
+    .spec-sound p { margin-top: 4px; font-size: 10px; line-height: 1.55; color: var(--muted); }
+
+    .garage-foot {
+      flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+      gap: 14px; padding-top: 12px; border-top: 1px solid rgba(25,255,138,0.12);
+    }
+    .garage-keys { display: flex; flex-direction: column; gap: 4px; font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+    .garage-keys b { color: var(--text); font-weight: 700; }
+    .garage-start {
+      flex: 0 0 auto; cursor: pointer;
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 20px; border-radius: 8px;
+      background: var(--accent); color: #04120b;
+      border: none; font-size: 11px; font-weight: 900; letter-spacing: 2.5px;
+      box-shadow: 0 0 28px rgba(25,255,138,0.35);
+      transition: transform .15s, box-shadow .15s;
+    }
+    .garage-start:hover { transform: translateY(-1px); box-shadow: 0 0 38px rgba(25,255,138,0.55); }
+    .garage-start span { font-size: 14px; }
+
+    @media (max-width: 1080px) {
+      .garage-left { width: 52vw; padding: 20px; }
+      .garage-close { left: calc(52vw - 36px); }
+      .garage-head h1 { font-size: 20px; }
+      .spec-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -233,21 +435,71 @@
           </div>
         </div>
         <div class="setting-row">
+          <label>Radio <span class="val" id="radioStationLabel">SUBWAY 88.3</span></label>
           <div class="grid2">
-            <button class="toggle active" id="audioOn">Audio ON</button>
-            <button class="toggle" id="audioOff">Mute</button>
+            <button class="toggle active" id="radioOn">RADIO ON</button>
+            <button class="toggle" id="radioOff">RADIO OFF</button>
+          </div>
+          <label style="margin-top:10px">Radio Volume <span class="val" id="radioVolVal">50</span></label>
+          <input type="range" id="radioVolume" min="0" max="100" step="1" value="50" />
+          <button class="toggle" id="radioNext" style="width:100%;margin-top:8px">NEXT STATION · R</button>
+        </div>
+        <div class="setting-row">
+          <div class="grid2">
+            <button class="toggle active" id="audioOn">Engine ON</button>
+            <button class="toggle" id="audioOff">Engine MUTE</button>
           </div>
         </div>
         <div class="hint">
           <b>W / ↑</b> accelerate &nbsp; <b>S / ↓</b> brake/reverse<br>
           <b>A / D</b> steer &nbsp; <b>Space</b> handbrake (drift)<br>
           <b>Q</b> nitro boost &nbsp; <b>E</b> high-beam headlights<br>
-          <b>X / Z</b> manual upshift / downshift
+          <b>X / Z</b> manual upshift / downshift<br>
+          <b>G</b> garage &nbsp; <b>R</b> next radio station
         </div>
       </div>
     </div>
 
+    <div class="radio-hud" id="radioHud">
+      <div class="radio-dot"></div>
+      <div>
+        <div class="radio-station" id="radioStation">SUBWAY 88.3</div>
+        <div class="radio-genre" id="radioGenre">UNDERGROUND BREAKS</div>
+      </div>
+      <div class="radio-key">R</div>
+    </div>
+
+    <button class="garage-btn" id="garageBtn">GARAGE</button>
     <div class="brand">MIDNIGHT <span>TUNER</span></div>
+  </div>
+
+  <!-- ============================================================ GARAGE -->
+  <div id="garage" class="garage hidden">
+    <aside class="garage-left">
+      <header class="garage-head">
+        <div class="garage-kicker">NIGHT CITY <span>/</span> GARAGE</div>
+        <h1>SELECT YOUR <em>MACHINE</em></h1>
+        <div class="garage-tabs" id="garageTabs">
+          <button data-filter="all" class="active">ALL</button>
+          <button data-filter="car">CARS</button>
+          <button data-filter="bike">MOTORCYCLES</button>
+        </div>
+      </header>
+
+      <button class="garage-close" id="garageClose" title="Garajni yopish">✕</button>
+
+      <div class="garage-list" id="garageList"></div>
+      <section class="garage-spec" id="garageSpec"></section>
+
+      <footer class="garage-foot">
+        <div class="garage-keys">
+          <span><b>↑ ↓</b> tanlash</span>
+          <span><b>ENTER</b> yurishni boshlash</span>
+          <span><b>G</b> garajni yopish / ochish</span>
+        </div>
+        <button class="garage-start" id="garageStart">START ENGINE <span>➜</span></button>
+      </footer>
+    </aside>
   </div>
 
   <div id="loading">LOADING CITY…</div>

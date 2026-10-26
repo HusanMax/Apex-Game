@@ -4,13 +4,14 @@ const G = 9.81
 const clamp = THREE.MathUtils.clamp
 
 export class VehicleController {
-  constructor({ vehicle, environment }) {
+  constructor({ vehicle, environment, spec }) {
     this.vehicle = vehicle
     this.env = environment
+    this.spec = spec
 
     this.input = {
       forward: false, backward: false, left: false, right: false,
-      handbrake: false, nitro: false, headlights: false
+      handbrake: false, nitro: false, headlights: true
     }
 
     /* ---------------- vehicle parameters (metric) ---------------- */
@@ -56,11 +57,11 @@ export class VehicleController {
     this.longStiffness = 12.0
 
     // speed sensitive steering
-    this.maxSteer = 0.65           // low speed lock
-    this.maxSteerHigh = 0.16       // high speed lock cap
-    this.steerRate = 6.5           // progressive wheel rate (rad/s)
-    this.steerReturnRate = 9.5
-    this.steerSensitivity = 1.3
+    this.maxSteer = 0.75           // low speed lock
+    this.maxSteerHigh = 0.14       // high speed lock cap — yengilroq tez burilish
+    this.steerRate = 9.5           // progressiv rul tezligi (rad/s) — tezroq jawob
+    this.steerReturnRate = 25.0    // rul qaytish tezligi — tezda to'g'rilanish
+    this.steerSensitivity = 1.6    // keyboard sensibility
 
     // suspension geometry
     this.trackWidth = 1.56
@@ -108,6 +109,7 @@ export class VehicleController {
 
     this.steerCommand = 0
     this.currentSteerAngle = 0
+    this.controlsEnabled = true
     this.understeer = 0
     this.oversteer = 0
     this.isUndersteering = false
@@ -118,17 +120,204 @@ export class VehicleController {
     this.camYaw = 0
     this.camLook = new THREE.Vector3(0, 1.2, -12)
     this.camDistance = 4.5
+    // the rig's actual smoothed position (a spring, not a hard weld to the car)
+    this.camPos = new THREE.Vector3(0, 2, 6)
+    this._snapCamera = true
     this.shake = 0
+    this._shakeT = 0
     this.longAccel = 0
+    // accelerations low-passed before they tilt the body / the camera
+    this.smoothAccel = 0
+    this.smoothLateral = 0
     this.bodyRoll = 0
     this.bodyPitch = 0
 
+    this.isBike = false
+    this.topSpeed = 117
+
+    if (spec) this.applyVehicle(spec)
     this._bindKeys()
   }
 
+  /** Load the garage machine's performance package and start fresh. */
+  applyVehicle(spec, { keepPlace = false } = {}) {
+    const p = spec.physics
+    const X = this.X
+    const Z = this.Z
+    const psi = this.psi
+    const camYaw = this.camYaw
+    this.spec = spec
+    this.isBike = spec.type === 'bike'
+
+    this.mass = p.mass
+    this.Iz = p.iz
+    this.wheelBase = p.wheelBase
+    this.a = p.a
+    this.b = p.b
+    this.cgHeight = p.cgHeight
+    this.mu = p.mu
+    this.trackWidth = p.trackWidth
+    this.wheelRadius = p.wheelRadius
+    this.finalDrive = p.finalDrive
+    this.gearRatios = [...p.gearRatios]
+    this.redline = p.redline
+    this.idle = p.idle
+    this.maxTorque = p.torque
+    this.dragCd = p.dragCd
+    this.area = p.area
+    this.brakeForce = p.brakeForce
+    this.brakeFront = p.brakeFront
+    this.brakeRear = p.brakeRear
+    this.driveFront = p.driveFront
+    this.driveRear = p.driveRear
+    this.maxSteer = p.maxSteer
+    this.maxSteerHigh = p.maxSteerHigh
+    this.topSpeed = p.topSpeedKph / 3.6
+
+    this.vehicle.maxSpeed = p.topSpeedKph
+    // the new machine arrives with its lights on; keep the HUD lamp in sync
+    this.input.headlights = this.vehicle.headlightsOn !== false
+    this.reset()
+
+    // swapping machines in the garage should not teleport the player back to
+    // the start line — keep the current spot, just stop the machine there
+    if (keepPlace) {
+      this.X = X
+      this.Z = Z
+      this.psi = psi
+      // the camera is parked behind the machine; without this it swings back
+      // around the moment the new machine is picked
+      this.camYaw = camYaw
+      this.camLook.set(
+        this.X - Math.sin(this.psi) * 10,
+        1.15,
+        this.Z - Math.cos(this.psi) * 10
+      )
+      this.vehicle.setPosition(this.X, 0, this.Z, this.psi)
+    }
+  }
+
+  reset() {
+    this.X = 2
+    this.Z = 0
+    this.psi = 0
+    this.u = 0
+    this.v = 0
+    this.r = 0
+    this.steerAngle = 0
+    this.steerCommand = 0
+    this.currentSteerAngle = 0
+    this.gear = 1
+    this.rpm = this.idle
+    this.shiftTimer = 0
+    this.throttle = 0
+    this.brakeInput = 0
+    this._prevThrottle = 0
+    this.nitro = this.nitroMax
+    this.nitroActive = false
+    this.nitroCooldown = 0
+    this.shiftPitch = 0
+    this.shiftLock = 0
+    this.liftTimer = 0
+    this._shiftKind = null
+    this.slip = 0
+    this.slipAngleF = 0
+    this.slipAngleR = 0
+    this.slipRatioF = 0
+    this.slipRatioR = 0
+    this.tireSlipRatio = 0
+    this.brakePressure = 0
+    this.absActive = false
+    this.absPulse = 1
+    this.bodyRoll = 0
+    this.bodyPitch = 0
+    this.shake = 0
+    this._shakeT = 0
+    this.smoothAccel = 0
+    this.smoothLateral = 0
+    this.longAccel = 0
+    this.camYaw = 0
+    this._snapCamera = true
+    this.camLook.set(this.X - Math.sin(this.psi) * 10, 1.15, this.Z - Math.cos(this.psi) * 10)
+    this.input.forward = false
+    this.input.backward = false
+    this.input.left = false
+    this.input.right = false
+    this.input.handbrake = false
+    this.input.nitro = false
+
+    this.vehicle.setNitroColor?.(false)
+    this.vehicle.setSteerAngle?.(0)
+    this.vehicle.setPosition(this.X, 0, this.Z, this.psi)
+    this.vehicle.setBodyAttitude(0, 0)
+  }
+
+  /** Stop the machine where it stands (the garage is opened mid-run). */
+  park() {
+    this.u = 0
+    this.v = 0
+    this.r = 0
+    this.steerAngle = 0
+    this.steerCommand = 0
+    this.currentSteerAngle = 0
+    this.throttle = 0
+    this.brakeInput = 0
+    this.brakePressure = 0
+    this.slip = 0
+    this.slipAngleF = 0
+    this.slipAngleR = 0
+    this.slipRatioF = 0
+    this.slipRatioR = 0
+    this.tireSlipRatio = 0
+    this.gear = 1
+    this.rpm = this.idle
+    this.shiftTimer = 0
+    this.shiftLock = 0
+    this.shiftPitch = 0
+    this.liftTimer = 0
+    this._shiftKind = null
+    this._prevThrottle = 0
+    this.nitroActive = false
+    this.bodyRoll = 0
+    this.bodyPitch = 0
+    this.longAccel = 0
+    this.shake = 0
+    this._shakeT = 0
+    this.smoothAccel = 0
+    this.smoothLateral = 0
+    // line the chase camera up with the machine while it stands in the garage,
+    // so closing the garage does not snap the view round from a stale yaw
+    this.camYaw = this.psi
+    this._snapCamera = true
+    this.camLook.set(
+      this.X - Math.sin(this.psi) * 10,
+      1.15,
+      this.Z - Math.cos(this.psi) * 10
+    )
+    this.vehicle.setNitroColor?.(false)
+    this.vehicle.setSteerAngle?.(0)
+    this.vehicle.setBodyAttitude(0, 0)
+  }
+
   /* ------------------------------------------------------------- input */
+  /**
+   * While the garage is open the arrow keys drive the menu, not the car, so
+   * the controller stops listening. Any held key is released on re-enable.
+   */
+  setControlsEnabled(enabled) {
+    this.controlsEnabled = !!enabled
+    if (!this.controlsEnabled) {
+      this.input.forward = false
+      this.input.backward = false
+      this.input.left = false
+      this.input.right = false
+      this.input.handbrake = false
+    }
+  }
+
   _bindKeys() {
     const handler = (e) => {
+      if (!this.controlsEnabled) return
       const down = e.type === 'keydown'
       switch (e.code) {
         case 'KeyW': case 'ArrowUp': this.input.forward = down; break
@@ -155,6 +344,15 @@ export class VehicleController {
     }
     window.addEventListener('keydown', handler)
     window.addEventListener('keyup', handler)
+    // a keyup is lost when the window loses focus mid-corner (alt-tab), which
+    // would leave the throttle pinned; release everything instead
+    window.addEventListener('blur', () => {
+      this.input.forward = false
+      this.input.backward = false
+      this.input.left = false
+      this.input.right = false
+      this.input.handbrake = false
+    })
   }
 
   _toggleNitro() {
@@ -172,9 +370,18 @@ export class VehicleController {
 
   /* ------------------------------------------------------------- torque */
   _torqueCurve(x) {
-    // normalized torque vs rpm fraction, peak ~0.55
-    const peak = 0.55
-    return clamp(1 - Math.pow((x - peak) / 0.62, 2) * 0.75, 0.22, 1)
+    // Normalised torque vs rpm fraction.  A real engine makes peak torque
+    // around two-thirds of the rev range: below that the curve climbs, above
+    // it torque falls away towards the limiter.  That shape is what gives the
+    // launch its shove and makes the top of the rev range feel like it is
+    // running out of breath.
+    const peak = 0.62
+    if (x <= peak) {
+      const t = clamp(x / peak, 0, 1)
+      return 0.45 + 0.55 * Math.sin((t * Math.PI) / 2)
+    }
+    const t = clamp((x - peak) / (1 - peak), 0, 1)
+    return 1 - 0.14 * t * t
   }
 
   /**
@@ -244,7 +451,7 @@ export class VehicleController {
       this._shiftKind = 'up'
       this.shiftPitch = -0.012
       this.shake = Math.max(this.shake, 0.14)
-    } else if (wheelRpm < 2100 && this.gear > 1) {
+    } else if (wheelRpm < clamp(this.redline * 0.3, 1500, 3200) && this.gear > 1) {
       this.gear--
       const newRatio = this.gearRatios[this.gear - 1]
       const newWheelRpm = (Math.abs(this.u) / this.wheelRadius) * newRatio * this.finalDrive * 60 / (2 * Math.PI)
@@ -288,9 +495,11 @@ export class VehicleController {
     const sensLimit = Math.min(this.maxSteer, steerLimit * this.steerSensitivity)
     let desired
     if (released) {
-      // self-centering / lane assist: the wheel returns to centre and the
-      // chassis is nudged back towards the road direction.
-      desired = clamp(-this.psi * 4.0 - this.r * 0.8, -steerLimit, steerLimit)
+      // self-centering / lane assist: the wheel snaps back to centre and the
+      // chassis is pulled back towards the road direction.  The old gains were
+      // soft enough that the car kept drifting through the corner after the
+      // key was let go; these straighten it out in one quick, clean move.
+      desired = clamp(-this.psi * 7.0 - this.r * 1.6, -steerLimit, steerLimit)
     } else {
       desired = clamp(this.steerCommand * sensLimit, -sensLimit, sensLimit)
     }
@@ -331,7 +540,9 @@ export class VehicleController {
 
     /* ---- drive / brake / engine-brake forces ---- */
     const tq = this._torqueCurve(this.rpm / this.redline) * this.maxTorque
-    let driveForce = this.throttle * tq * gearRatio * this.finalDrive / this.wheelRadius * 0.85
+    // 0.95 accounts for the driveline loss; it is also what lets every machine
+    // pull its own advertised top speed in top gear before the governor trims it
+    let driveForce = this.throttle * tq * gearRatio * this.finalDrive / this.wheelRadius * 0.95
     if (this.nitroActive) driveForce *= 2.5
     if (this.shiftTimer > 0) driveForce *= 0.12
 
@@ -368,7 +579,14 @@ export class VehicleController {
     const ax = Fx / this.mass
     this.longAccel = ax
     this.u += ax * dt
-    this.u = clamp(this.u, -12, 117)
+    this.u = clamp(this.u, -12, this.topSpeed * 1.08)
+    // machine-specific top speed: a soft governor instead of a hard wall.
+    // Nitro earns a little headroom above the stock limit, like the games it
+    // is inspired by, but the machine always settles back to its own top end.
+    const governor = this.topSpeed * (this.nitroActive ? 1.08 : 1)
+    if (this.u > governor) {
+      this.u += (governor - this.u) * Math.min(1, dt * 2.2)
+    }
 
     /* ---- weight transfer (longitudinal + lateral) ---- */
     const FzF = Math.max(this.mass * G * this.b / this.wheelBase - this.mass * ax * this.cgHeight / this.wheelBase, this.mass * G * 0.2)
@@ -444,9 +662,10 @@ export class VehicleController {
     this.r *= (1 - 0.3 * dt)
 
     // steering self-centering: with the wheel released the car straightens
-    // its line instead of continuing to rotate into the next lane.
+    // its line instead of continuing to rotate into the next lane.  Firm and
+    // frame-rate independent, so letting go mid-corner ends the turn promptly.
     if (released && Math.abs(this.u) > 5) {
-      this.r *= 1 - 5.0 * dt
+      this.r *= Math.exp(-9.0 * dt)
     }
 
     // tyre slip telemetry + understeer / oversteer detection
@@ -484,12 +703,19 @@ export class VehicleController {
     this.X += (-this.u * Math.sin(this.psi) - this.v * Math.cos(this.psi)) * dt
     this.Z += (-this.u * Math.cos(this.psi) + this.v * Math.sin(this.psi)) * dt
 
-    /* ---- road barrier ---- */
+    /* ---- road barrier ----
+     * Scraping the kerb must not scrub speed.  The barrier only holds the
+     * machine inside the road and cancels the sideways velocity that pushed it
+     * there; the forward speed carries straight through.  The old code bled
+     * 2·u per second off the throttle and threw away 70% of the lateral
+     * velocity every frame (0.7^60 ≈ 0 within a second), so brushing the edge
+     * at speed felt like stamping on the brake. */
     if (Math.abs(this.X) > 7.2) {
       this.X = Math.sign(this.X) * 7.2
-      this.u *= (1 - 2.0 * dt)
-      this.v *= 0.7
-      this.shake = Math.max(this.shake, 0.25)
+      // damp only the component driving into the wall, frame-rate independent
+      this.v *= Math.exp(-12 * dt)
+      // a light, steady rumble while the body grinds along the barrier
+      this.shake = Math.max(this.shake, 0.08)
     }
 
     /* ---- nitro resource ---- */
@@ -509,15 +735,31 @@ export class VehicleController {
     this.vehicle.speedKmh = speedKmh
     this.vehicle.setPosition(this.X, 0, this.Z, this.psi)
 
-    // subtle body roll into corners + pitch under braking/acceleration
-    const lateralAccel = ay
+    // subtle body roll into corners + pitch under braking/acceleration.
+    // The raw forces buzz at 10-15 Hz: the ABS pressure pulse alone switches the
+    // brake force on and off at 12 Hz, and feeding that square wave straight into
+    // the attitude made the whole machine nod, with the camera (which leans with
+    // the body) shaking along with it.  Low-pass the accelerations first so the
+    // body settles into the corner instead of vibrating.
+    const attEase = 1 - Math.exp(-6 * dt)
+    this.smoothAccel += (this.longAccel - this.smoothAccel) * attEase
+    this.smoothLateral += (ay - this.smoothLateral) * attEase
+
+    const lateralAccel = this.smoothLateral
     const rollScale = clamp(Math.abs(this.u) / 7, 0, 1)
-    const targetRoll = clamp(-lateralAccel * 0.007, -0.06, 0.06) * rollScale
+    // cars roll outward on their springs; bikes lean INTO the corner
+    const targetRoll = this.isBike
+      ? clamp(lateralAccel * 0.03, -0.7, 0.7) * rollScale
+      : clamp(-lateralAccel * 0.007, -0.06, 0.06) * rollScale
     this.shiftPitch *= Math.max(0, 1 - dt * 9)
-    const targetPitch = clamp(this.longAccel * 0.0035 + this.shiftPitch, -0.05, 0.05)
-    this.bodyRoll += (targetRoll - this.bodyRoll) * Math.min(1, dt * 7)
-    this.bodyPitch += (targetPitch - this.bodyPitch) * Math.min(1, dt * 8)
+    const targetPitch = clamp(this.smoothAccel * 0.0035 + this.shiftPitch, -0.05, 0.05)
+    const attRate = 1 - Math.exp(-9 * dt)
+    this.bodyRoll += (targetRoll - this.bodyRoll) * attRate
+    this.bodyPitch += (targetPitch - this.bodyPitch) * attRate
     this.vehicle.setBodyAttitude(this.bodyRoll, this.bodyPitch)
+    // front wheels visibly turn with the steering (cars only; a bike's fork
+    // is a fixed part of its body model)
+    this.vehicle.setSteerAngle?.(this.steerAngle)
 
     this.vehicle.update(dt, Math.abs(this.u))
     this.vehicle.setNitroColor(this.nitroActive)
@@ -547,46 +789,93 @@ export class VehicleController {
   }
 
   _updateCamera(dt, camera, speedFactor) {
-    // smooth yaw follow: the camera swings behind the car when cornering
-    // (fixed orbit radius, so it never pulls away at speed)
+    // Exponential smoothing.  `dt * k` changes strength with the frame rate, so
+    // at 30 fps the camera followed at half the speed it did at 60 fps and the
+    // view looked like it lagged behind and then jumped to catch up.
+    const ease = (rate) => 1 - Math.exp(-rate * dt)
+
+    // The chase camera is a spring, not a weld.  Copying the car's position
+    // every frame made it feel bolted to the roof: no sense of speed, no sense
+    // of weight.  Following the car with a lag instead lets it pull away under
+    // acceleration, close in under braking and swing wide through a corner —
+    // that trailing motion is what sells the movement.
     let dYaw = this.psi - this.camYaw
     dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw))
-    this.camYaw += dYaw * Math.min(1, dt * 7)
+    this.camYaw += dYaw * ease(4.0)
 
     const dist = this.camDistance
-    const local = new THREE.Vector3(0, 1.95 + (dist - 4.5) * 0.14, dist)
+    // Almost no pull-back at speed: the rig used to stretch 16% back by top
+    // speed, which combined with the spring lag left the car shrinking into
+    // the distance.  The chase length now stays essentially fixed.
+    const stretch = 1 + speedFactor * 0.04
+    const local = new THREE.Vector3(0, 1.95 + (dist - 4.5) * 0.14, dist * stretch)
     local.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.camYaw)
     const desired = new THREE.Vector3(this.X, 0, this.Z).add(local)
+    // the camera sags back on the throttle and noses in under braking
+    desired.y -= clamp(this.smoothAccel * 0.0016, -0.05, 0.05)
 
-    camera.position.copy(desired)
+    if (this._snapCamera) {
+      // fresh start / garage: put the rig where it belongs instead of gliding
+      this.camPos.copy(desired)
+      this._snapCamera = false
+    } else {
+      // A fixed lag works while parking but not at speed: at 300 km/h the car
+      // covers five metres in one 60 Hz frame, so the same smoothing dropped
+      // the rig further and further behind and the car shrank into the
+      // distance.  Chase harder the faster the car goes, so the trailing feel
+      // stays at low speed and the gap stays small at high speed.
+      const followRate = 7 + speedFactor * 22
+      this.camPos.x += (desired.x - this.camPos.x) * ease(followRate)
+      this.camPos.z += (desired.z - this.camPos.z) * ease(followRate)
+      // a little slower vertically so crests are not rigid
+      this.camPos.y += (desired.y - this.camPos.y) * ease(4)
 
-    // look ahead of the car
-    const lookDist = 10 + speedFactor * 6
+      // Hard limit on how far the spring may trail its station, so a long
+      // straight can never leave the camera drifting away from the machine.
+      const driftX = this.camPos.x - desired.x
+      const driftZ = this.camPos.z - desired.z
+      const drift = Math.hypot(driftX, driftZ)
+      const maxDrift = 1.2
+      if (drift > maxDrift) {
+        const k = maxDrift / drift
+        this.camPos.x = desired.x + driftX * k
+        this.camPos.z = desired.z + driftZ * k
+      }
+    }
+    camera.position.copy(this.camPos)
+
+    // aim well past the nose: at speed the view looks down the road instead of
+    // at the boot lid
+    const lookDist = 8 + speedFactor * 12
     const look = new THREE.Vector3(
       this.X - Math.sin(this.psi) * lookDist,
       1.15,
       this.Z - Math.cos(this.psi) * lookDist
     )
-    this.camLook.lerp(look, Math.min(1, dt * 10))
+    this.camLook.lerp(look, ease(6))
     camera.lookAt(this.camLook)
 
     // weight-transfer camera recoil: lean with the body and settle under G
-    camera.rotateZ(-this.bodyRoll * 0.7)
-    camera.rotateX(this.bodyPitch * 0.35)
-    camera.translateX(clamp(this.gForceVector.lateral * 0.12, -0.12, 0.12))
-    camera.position.y += clamp(this.longAccel * 0.002, -0.03, 0.03)
+    // (a bike leans much further than a car, so the camera only takes a
+    // fraction of it — a full lean would roll the whole screen)
+    camera.rotateZ(-clamp(this.bodyRoll, -0.14, 0.14) * 0.55)
+    camera.rotateX(this.bodyPitch * 0.3)
+    camera.translateX(clamp((this.smoothLateral / G) * 0.1, -0.1, 0.1))
 
-    // shake (collisions, nitro and the ABS pressure pulses)
-    const absShake = this.absActive && this.absPulse < 0.8 ? 0.014 : 0
-    const shakeAmt = this.shake * 0.35 + (this.nitroActive ? 0.035 : 0) + absShake
-    if (shakeAmt > 0.001) {
-      camera.position.x += (Math.random() - 0.5) * shakeAmt
-      camera.position.y += (Math.random() - 0.5) * shakeAmt
+    // A hit is a decaying tremor, not a fresh random offset every frame.  New
+    // random numbers at 60 Hz read as permanent vibration, and the ABS pulse
+    // added a 12 Hz buzz on top of it.  Two out-of-phase sines give a smooth,
+    // short shudder that fades out with this.shake.
+    if (this.shake > 0.02) this._shakeT += dt
+    const shakeAmt = Math.max(0, this.shake - 0.02) * 0.22 + (this.nitroActive ? 0.012 : 0)
+    if (shakeAmt > 0.0005) {
+      camera.position.x += Math.sin(this._shakeT * 41) * shakeAmt
+      camera.position.y += Math.sin(this._shakeT * 57 + 1.7) * shakeAmt * 0.7
     }
 
     // speed/nitro FOV kick
     const targetFov = 60 + speedFactor * 3 + (this.nitroActive ? 2.5 : 0)
-    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 5)
+    camera.fov += (targetFov - camera.fov) * ease(5)
     camera.updateProjectionMatrix()
   }
 

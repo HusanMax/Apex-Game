@@ -1,0 +1,13 @@
+{
+  "_comment": "Per-machine engine recordings. Each machine can point at one continuous rev recording with \"loop\" (best: the engine note follows the revs smoothly), or at three fixed-band loops (\"idle\" / \"mid\" / \"high\"). A plain string is shorthand for \"loop\". Files live in this folder. Any machine without an entry uses the shared /audio/engine_idle.mp3, /audio/engine_mid.mp3 and /audio/engine_high.mp3 loops, pitch-shifted to its own engine note. Keys starting with an underscore are comments and are ignored.",
+  "_example": {
+    "supra": "/audio/engines/supra_loop.mp3",
+    "skyline": {
+      "idle": "/audio/engines/skyline_idle.mp3",
+      "mid": "/audio/engines/skyline_mid.mp3",
+      "high": "/audio/engines/skyline_high.mp3"
+    }
+  },
+  "_user_recording": "user_engine_loop.mp3 is the player's own recording (copied from the repo root). It is wired to the Cobalt, the first machine in the garage; move the line to another machine id to hear it there, or delete it to fall back to the shared loops.",
+  "cobalt": { "loop": "/audio/engines/user_engine_loop.mp3" }
+}

@@ -76,6 +76,13 @@ export class TrafficSystem {
 
   update(dt, playerZ, playerX) {
     let collided = false
+    // a hypercar can cover a hundred metres between frames, so a per-frame point
+    // test would let it tunnel straight through traffic; instead sweep the
+    // player's travelled segment this frame and test the car against it.
+    const prevZ = this._lastPlayerZ ?? playerZ
+    this._lastPlayerZ = playerZ
+    const zNear = Math.min(prevZ, playerZ) - 2.2
+    const zFar = Math.max(prevZ, playerZ) + 2.2
 
     for (let i = 0; i < this.cars.length; i++) {
       const car = this.cars[i]
@@ -94,8 +101,8 @@ export class TrafficSystem {
       car.group.position.z = car.z
       car.group.position.x = LANES[car.lane]
 
-      // collision test with player
-      if (Math.abs(car.z - playerZ) < 3.4 && Math.abs(LANES[car.lane] - playerX) < 2.0) {
+      // collision test with player: swept against the segment travelled this frame
+      if (car.z > zNear && car.z < zFar && Math.abs(LANES[car.lane] - playerX) < 2.0) {
         collided = true
         this._respawn(car, playerZ) // move it away
       }

@@ -31,7 +31,17 @@ export class HUDManager {
       timeNight: document.getElementById('timeNight'),
       timeDay: document.getElementById('timeDay'),
       audioOn: document.getElementById('audioOn'),
-      audioOff: document.getElementById('audioOff')
+      audioOff: document.getElementById('audioOff'),
+      radioHud: document.getElementById('radioHud'),
+      radioStation: document.getElementById('radioStation'),
+      radioGenre: document.getElementById('radioGenre'),
+      radioStationLabel: document.getElementById('radioStationLabel'),
+      radioVolume: document.getElementById('radioVolume'),
+      radioVolVal: document.getElementById('radioVolVal'),
+      radioNext: document.getElementById('radioNext'),
+      radioOn: document.getElementById('radioOn'),
+      radioOff: document.getElementById('radioOff'),
+      garageBtn: document.getElementById('garageBtn')
     }
 
     this.callbacks = {}
@@ -71,6 +81,25 @@ export class HUDManager {
   }
   timeGroup() { return { night: this.el.timeNight, day: this.el.timeDay } }
   audioGroup() { return { on: this.el.audioOn, off: this.el.audioOff } }
+  radioGroup() { return { on: this.el.radioOn, off: this.el.radioOff } }
+
+  /** Tune the tachometer to the selected machine. */
+  setVehicle(spec) {
+    this.redline = spec.physics.redline
+    this.maxRpm = Math.ceil((spec.physics.redline + 500) / 1000) * 1000
+    this._draw(this.needle)
+  }
+
+  updateRadio({ name, genre, title, enabled }) {
+    if (name) {
+      this.el.radioStation.textContent = name
+      this.el.radioStationLabel.textContent = name
+    }
+    // mixtape stations report the playing track instead of a genre
+    const sub = title && title !== 'LIVE MIX' ? title : genre
+    if (sub) this.el.radioGenre.textContent = sub
+    this.el.radioHud.classList.toggle('off', enabled === false)
+  }
 
   _bind() {
     const el = this.el
@@ -142,6 +171,19 @@ export class HUDManager {
     el.audioOff.addEventListener('click', () => {
       this._setGroupActive(this.audioGroup(), 'off'); this.callbacks.onAudio?.(false)
     })
+
+    el.radioOn.addEventListener('click', () => {
+      this._setGroupActive(this.radioGroup(), 'on'); this.callbacks.onRadio?.(true)
+    })
+    el.radioOff.addEventListener('click', () => {
+      this._setGroupActive(this.radioGroup(), 'off'); this.callbacks.onRadio?.(false)
+    })
+    el.radioNext.addEventListener('click', () => this.callbacks.onRadioNext?.())
+    el.radioVolume.addEventListener('input', (e) => {
+      el.radioVolVal.textContent = e.target.value
+      this.callbacks.onRadioVolume?.(Number(e.target.value) / 100)
+    })
+    el.garageBtn.addEventListener('click', () => this.callbacks.onGarage?.())
   }
 
   update(state) {
@@ -215,7 +257,7 @@ export class HUDManager {
       ctx.stroke()
     }
 
-    /* ---- redline 8-9 ---- */
+    /* ---- redline sector ---- */
     const redFrom = startAngle + (this.redline / this.maxRpm) * sweep
     ctx.save()
     ctx.beginPath()
@@ -228,35 +270,43 @@ export class HUDManager {
     ctx.stroke()
     ctx.restore()
 
-    /* ---- ticks and numbers 0..9 ---- */
+    /* ---- ticks and numbers ---- */
+    // ticks are laid out by rpm value, not by equal spacing, so every number
+    // lines up with the needle and the redline sector
+    const tickStep = 200
+    const tickCount = Math.floor(this.maxRpm / tickStep)
+    // a 15000 rpm bike dial would crowd 16 numbers into one sweep, so only
+    // every other thousand gets a label above 12000 rpm
+    const labelStep = this.maxRpm >= 12000 ? 2000 : 1000
     ctx.save()
     ctx.shadowColor = 'rgba(0,0,0,0.9)'
     ctx.shadowBlur = 4
-    for (let i = 0; i <= 45; i++) {
-      const major = i % 5 === 0
-      const a = startAngle + (i / 45) * sweep
-      const value = i / 5
-      const hot = value >= this.redline / 1000
-      const r0 = R - (major ? 22 : 12)
+    for (let i = 0; i <= tickCount; i++) {
+      const rpmValue = i * tickStep
+      const labeled = rpmValue % labelStep === 0
+      const long = rpmValue % 1000 === 0
+      const a = startAngle + (rpmValue / this.maxRpm) * sweep
+      const hot = rpmValue >= this.redline
+      const r0 = R - (labeled ? 22 : long ? 16 : 12)
       const r1 = R - 8
 
       ctx.beginPath()
       ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0)
       ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1)
       ctx.strokeStyle = hot
-        ? (major ? 'rgba(255,120,145,0.95)' : 'rgba(255,90,120,0.6)')
-        : (major ? 'rgba(240,255,255,0.9)' : 'rgba(180,215,225,0.4)')
-      ctx.lineWidth = major ? 2 : 1
+        ? (long ? 'rgba(255,120,145,0.95)' : 'rgba(255,90,120,0.6)')
+        : (long ? 'rgba(240,255,255,0.9)' : 'rgba(180,215,225,0.4)')
+      ctx.lineWidth = long ? 2 : 1
       ctx.stroke()
 
-      if (major) {
+      if (labeled) {
         const lx = cx + Math.cos(a) * (R - 40)
         const ly = cy + Math.sin(a) * (R - 40)
         ctx.fillStyle = hot ? 'rgba(255,130,150,0.95)' : 'rgba(235,250,255,0.88)'
         ctx.font = '700 13px "Segoe UI", Arial, sans-serif'
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
-        ctx.fillText(String(value), lx, ly)
+        ctx.fillText(String(rpmValue / 1000), lx, ly)
       }
     }
     ctx.restore()
