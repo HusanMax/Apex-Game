@@ -369,26 +369,39 @@ export class PlayerVehicle {
 
   /** True if the model's front (by wheel/lamp naming) currently points +Z. */
   _frontFacesPlusZ(root) {
+    const centerZOf = (o) => {
+      if (o.geometry) {
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox()
+        const bb = o.geometry.boundingBox
+        if (bb) {
+          const c = new THREE.Vector3()
+          bb.getCenter(c)
+          c.applyMatrix4(o.matrixWorld)
+          return c.z
+        }
+      }
+      const p = new THREE.Vector3()
+      o.getWorldPosition(p)
+      return p.z
+    }
+
     const frontWheels = []
     const rearWheels = []
-    let lampZ = null
+    let frontLampZ = null
+    let rearLampZ = null
     root.traverse((o) => {
       const n = (o.name || '').toLowerCase()
-      if (/wheel|tire|tyre/.test(n)) {
-        // classify front vs rear by the letter near the axle slot.  Names like
-        // wheel_fl / wheel_fr / wheel_rf / wheel_lf are front; wheel_rl / wheel_rr
-        // / wheel_rb are rear.  A plain "wheel" with no slot falls through.
+      if (/wheel|tire|tyre|roda/.test(n)) {
         const isFront = /(^|[_-])(f|fl|fr|lf|rf|front)([_-]|$)/.test(n)
         const isRear = /(^|[_-])(r|rl|rr|lr|rb|rear)([_-]|$)/.test(n)
         if (isFront || isRear) {
-          const p = new THREE.Vector3()
-          o.getWorldPosition(p)
-          ;(isFront ? frontWheels : rearWheels).push(p.z)
+          const z = centerZOf(o)
+          ;(isFront ? frontWheels : rearWheels).push(z)
         }
-      } else if (lampZ === null && /fara|head|front_light/.test(n)) {
-        const p = new THREE.Vector3()
-        o.getWorldPosition(p)
-        lampZ = p.z
+      } else if (/fara|headlight|head|front_light|front.*led|led.*front/.test(n)) {
+        if (frontLampZ === null) frontLampZ = centerZOf(o)
+      } else if (/rear.*led|led.*rear|rear_light|taillight|ascende|tail.*light/.test(n)) {
+        if (rearLampZ === null) rearLampZ = centerZOf(o)
       }
     })
     if (frontWheels.length && rearWheels.length) {
@@ -396,11 +409,10 @@ export class PlayerVehicle {
       const rz = rearWheels.reduce((a, b) => a + b, 0) / rearWheels.length
       return fz > rz
     }
-    // no clear wheel labels: fall back to front-lamp position if the model has
-    // named headlights; otherwise, since most of these exports ship facing +Z
-    // (nose toward the camera) and were previously never corrected, default to
-    // flipping the model to face -Z (the direction the sim actually drives).
-    if (lampZ !== null) return lampZ > 0
+    // use front-lamp geometry centre if wheels were ambiguous
+    if (frontLampZ !== null) { return frontLampZ > 0 }
+    // no usable labels: default to flipping (most exports ship facing +Z)
+    console.info('[PV] no labels', this.spec.id, 'default flip')
     return true
   }
 

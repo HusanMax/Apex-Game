@@ -741,7 +741,7 @@ export const VEHICLES = [
     topSpeedKph: 240,
     stats: { speed: 68, accel: 72, handling: 55, braking: 68 },
     soundFlavor: 'V8 AMG gumburlashi, biturbo, ammo og‘ir kuzov — chuqur va jevarli',
-    model: { kind: 'glb', url: '/models/g63.glb', style: 'muscle', flip: false },
+    model: { kind: 'glb', url: '/models/g63.glb', style: 'muscle' },
     sound: {
       cylinders: 8, firing: 4, redline: 6800, idle: 750,
       turbo: true, rasp: 1.0, sub: 0.9, brightness: 0.78, lope: 0.2, useSamples: true,

@@ -80,6 +80,8 @@ function selectVehicle(spec) {
   hud.setVehicle(spec)
   audio.setProfile({ ...spec.sound, id: spec.id })
   garageRevT = 1.1
+  // make the actual 3D model from public/models visible in the garage preview
+  vehicle.loadModel()
 }
 
 const garage = new Garage({
@@ -106,6 +108,8 @@ const garage = new Garage({
     physics.input.left = false
     physics.input.right = false
     physics.input.handbrake = false
+    // show the real 3D model from public/models in the selection screen
+    vehicle.loadModel()
   },
   onClose: () => {
     garageOpen = false
@@ -251,6 +255,8 @@ function loop(now) {
   renderer.render()
   requestAnimationFrame(loop)
 }
+
+// no debug globals
 requestAnimationFrame(loop)
 
 /* ---------- resize ---------- */
