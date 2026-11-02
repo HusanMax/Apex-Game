@@ -195,8 +195,11 @@ function updateGarageCamera(dt) {
     (bike ? 1.35 : 1.85) + Math.sin(orbitAngle * 0.7) * 0.12,
     car.z + Math.cos(orbitAngle) * radius
   )
-  camera.fov += (44 - camera.fov) * (1 - Math.exp(-4 * dt))
-  camera.updateProjectionMatrix()
+  const nextFov = camera.fov + (44 - camera.fov) * (1 - Math.exp(-4 * dt))
+  if (Math.abs(nextFov - camera.fov) > 0.0005) {
+    camera.fov = nextFov
+    camera.updateProjectionMatrix()
+  }
   camera.lookAt(car.x, bike ? 0.8 : 0.7, car.z)
   // push the machine into the free right-hand side of the screen
   camera.translateX(bike ? -1.15 : -2.15)

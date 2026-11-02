@@ -20,33 +20,37 @@ export class TrafficSystem {
     wheelGeo.rotateZ(Math.PI / 2)
     const tailGeo = new THREE.BoxGeometry(0.4, 0.14, 0.06)
 
+    // materials are shared by the whole pool (only the body colour varies), so
+    // twenty cars no longer create eighty separate materials and the renderer
+    // can batch the same state together
+    const bodyMats = CAR_COLORS.map((color) =>
+      new THREE.MeshStandardMaterial({ color, metalness: 0.75, roughness: 0.3 })
+    )
+    const cabinMat = new THREE.MeshStandardMaterial({ color: 0x0a1016, metalness: 0.5, roughness: 0.15 })
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x070809, roughness: 0.9 })
+    const tailMat = new THREE.MeshStandardMaterial({
+      color: 0xff2020, emissive: 0xff2020, emissiveIntensity: 2.0
+    })
+
     for (let i = 0; i < MAX_CARS; i++) {
       const grp = new THREE.Group()
 
-      const color = CAR_COLORS[i % CAR_COLORS.length]
-      const bodyMat = new THREE.MeshStandardMaterial({ color, metalness: 0.75, roughness: 0.3 })
+      const bodyMat = bodyMats[i % bodyMats.length]
       const body = new THREE.Mesh(bodyGeo, bodyMat)
       body.position.y = 0.62
       body.castShadow = true
       grp.add(body)
 
-      const cabin = new THREE.Mesh(
-        cabinGeo,
-        new THREE.MeshStandardMaterial({ color: 0x0a1016, metalness: 0.5, roughness: 0.15 })
-      )
+      const cabin = new THREE.Mesh(cabinGeo, cabinMat)
       cabin.position.set(0, 1.12, 0.1)
       grp.add(cabin)
 
-      const wheelMat = new THREE.MeshStandardMaterial({ color: 0x070809, roughness: 0.9 })
       for (const [wx, wz] of [[-0.9, -1.3], [0.9, -1.3], [-0.9, 1.3], [0.9, 1.3]]) {
         const w = new THREE.Mesh(wheelGeo, wheelMat)
         w.position.set(wx, 0.33, wz)
         grp.add(w)
       }
 
-      const tailMat = new THREE.MeshStandardMaterial({
-        color: 0xff2020, emissive: 0xff2020, emissiveIntensity: 2.0
-      })
       for (const sx of [-0.6, 0.6]) {
         const tail = new THREE.Mesh(tailGeo, tailMat)
         tail.position.set(sx, 0.7, 2.02)

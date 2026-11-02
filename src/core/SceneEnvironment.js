@@ -8,6 +8,16 @@ export const SEGMENT_COUNT = 16
 const LAMP_SPACING = 55
 const LAMP_COUNT = 12
 
+const SEASON_PALETTES = {
+  spring: [0x4fbf5a, 0x63cf6a, 0x3da84c],
+  summer: [0x2f7d3a, 0x3a9445, 0x256b31],
+  autumn: [0xc4691c, 0xd98a22, 0xa94e17],
+  rain: [0x335f3a, 0x3f7047, 0x2a5131]
+}
+const SEASON_GRASS = {
+  spring: 0x1d4a24, summer: 0x173d1f, autumn: 0x3a2b16, rain: 0x18331e
+}
+
 /* ------------------------------------------------------------------ textures */
 function makeAsphaltTexture() {
   const c = document.createElement('canvas')
@@ -171,6 +181,15 @@ export class SceneEnvironment {
     this._initTrees()
     this._initLamps()
     this._initAnimals()
+
+    // track the furthest-ahead objects incrementally instead of recomputing
+    // four full min() scans on every frame in updateRoad()
+    this._roadMinZ = Infinity
+    for (const s of this.roadSegments) this._roadMinZ = Math.min(this._roadMinZ, s.z)
+    this._lampMinZ = Infinity
+    for (const l of this.lamps) this._lampMinZ = Math.min(this._lampMinZ, l.z)
+    this._treeMinZ = Infinity
+    for (const t of this.treeData) this._treeMinZ = Math.min(this._treeMinZ, t.z)
 
     this.weather = null
     this.weatherType = 'spring'
@@ -379,6 +398,7 @@ export class SceneEnvironment {
     this._color = new THREE.Color()
     this._pos = new THREE.Vector3()
     this._scl = new THREE.Vector3()
+    this._up = new THREE.Vector3(0, 1, 0)
 
     for (let i = 0; i < this.treeCount; i++) {
       const side = i % 2 === 0 ? 1 : -1
@@ -401,17 +421,17 @@ export class SceneEnvironment {
 
     this._pos.set(t.x, 0, t.z)
     this._scl.set(t.h, t.h, t.h)
-    this._m4.compose(this._pos, this._q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2), this._scl)
+    this._m4.compose(this._pos, this._q.setFromAxisAngle(this._up, Math.random() * Math.PI * 2), this._scl)
     this.trunkMesh.setMatrixAt(i, this._m4)
 
     this._pos.set(t.x, 3.0 * t.h + t.r * 0.5, t.z)
     this._scl.set(t.r, t.r * 1.15, t.r)
-    this._m4.compose(this._pos, this._q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2), this._scl)
+    this._m4.compose(this._pos, this._q.setFromAxisAngle(this._up, Math.random() * Math.PI * 2), this._scl)
     this.leafMesh.setMatrixAt(i, this._m4)
 
     this._pos.set(t.x + t.r * 0.5, 3.0 * t.h + t.r * 1.05, t.z + t.r * 0.35)
     this._scl.set(t.r * 0.62, t.r * 0.72, t.r * 0.62)
-    this._m4.compose(this._pos, this._q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2), this._scl)
+    this._m4.compose(this._pos, this._q.setFromAxisAngle(this._up, Math.random() * Math.PI * 2), this._scl)
     this.leafMesh2.setMatrixAt(i, this._m4)
 
     this.trunkMesh.instanceMatrix.needsUpdate = true
@@ -421,14 +441,8 @@ export class SceneEnvironment {
 
   _applySeason(season) {
     this.season = season
-    const palettes = {
-      spring: [0x4fbf5a, 0x63cf6a, 0x3da84c],
-      summer: [0x2f7d3a, 0x3a9445, 0x256b31],
-      autumn: [0xc4691c, 0xd98a22, 0xa94e17],
-      rain: [0x335f3a, 0x3f7047, 0x2a5131]
-    }
-    const pal = palettes[season] || palettes.spring
-    const grass = { spring: 0x1d4a24, summer: 0x173d1f, autumn: 0x3a2b16, rain: 0x18331e }[season]
+    const pal = SEASON_PALETTES[season] || SEASON_PALETTES.spring
+    const grass = SEASON_GRASS[season]
     this.grassMat.color.setHex(grass)
 
     for (let i = 0; i < this.treeCount; i++) {
@@ -790,8 +804,7 @@ export class SceneEnvironment {
     this.carZ = carZ
 
     // road segments
-    let minZ = Infinity
-    for (const s of this.roadSegments) minZ = Math.min(minZ, s.z)
+    let minZ = this._roadMinZ
     for (const s of this.roadSegments) {
       if (s.z > carZ + SEGMENT_LENGTH * 1.5) {
         s.z = minZ - SEGMENT_LENGTH
@@ -799,10 +812,10 @@ export class SceneEnvironment {
         s.mesh.position.z = s.z
       }
     }
+    this._roadMinZ = minZ
 
     // lamps (kept in left/right pairs so both shoulders stay evenly lit)
-    let lampMin = Infinity
-    for (const l of this.lamps) lampMin = Math.min(lampMin, l.z)
+    let lampMin = this._lampMinZ
     for (let p = 0; p < this.lamps.length; p += 2) {
       const a = this.lamps[p]
       const b = this.lamps[p + 1]
@@ -816,10 +829,11 @@ export class SceneEnvironment {
         }
       }
     }
+    this._lampMinZ = lampMin
 
     // trees
-    let treeMin = Infinity
-    for (const t of this.treeData) treeMin = Math.min(treeMin, t.z)
+    let treeMin = this._treeMinZ
+    const pal = SEASON_PALETTES[this.season] || SEASON_PALETTES.spring
     for (let i = 0; i < this.treeData.length; i++) {
       const t = this.treeData[i]
       if (t.z > carZ + 100) {
@@ -831,12 +845,6 @@ export class SceneEnvironment {
         t.r = 1.15 + Math.random() * 1.05
         t.blossom = Math.random() < 0.2
         this._placeTree(i)
-        const pal = {
-          spring: [0x4fbf5a, 0x63cf6a, 0x3da84c],
-          summer: [0x2f7d3a, 0x3a9445, 0x256b31],
-          autumn: [0xc4691c, 0xd98a22, 0xa94e17],
-          rain: [0x335f3a, 0x3f7047, 0x2a5131]
-        }[this.season] || [0x4fbf5a]
         this._color.setHex(this.season === 'spring' && t.blossom ? 0xffe4ee : pal[i % pal.length])
         this.leafMesh.setColorAt(i, this._color)
         this.leafMesh2.setColorAt(i, this._color)
@@ -844,16 +852,18 @@ export class SceneEnvironment {
         this.leafMesh2.instanceColor.needsUpdate = true
       }
     }
+    this._treeMinZ = treeMin
 
     // roadside animals: appear, wander a little, recycle ahead
     const allowed = this.animalsAllowed || ['deer']
+    const now = performance.now() * 0.001
     for (const a of this.animals) {
       if (!a.grp.visible) {
         if (Math.random() < 0.0008) a.grp.visible = allowed.includes(a.type)
         continue
       }
-      a.grp.position.y = Math.abs(Math.sin(performance.now() * 0.0015 + a.phase)) * 0.03
-      a.grp.rotation.y += Math.sin(performance.now() * 0.0004 + a.phase) * 0.0015
+      a.grp.position.y = Math.abs(Math.sin(now * 1.5 + a.phase)) * 0.03
+      a.grp.rotation.y += Math.sin(now * 0.4 + a.phase) * 0.0015
       if (a.grp.position.z > carZ + 45) {
         const side = Math.random() < 0.5 ? 1 : -1
         a.side = side

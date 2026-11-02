@@ -64,6 +64,29 @@ export class HUDManager {
     this.needle = 0
     this._lastTime = performance.now()
 
+    // the dial's static artwork (backing, track, redline, ticks) is rendered
+    // once into offscreen layers; per frame only the progress arc and the
+    // needle are drawn on top.  Rebuilding the gradients and ~50 ticks every
+    // frame was the single biggest CPU cost of the HUD.
+    this._layersValid = false
+    this._bgLayer = document.createElement('canvas')
+    this._fgLayer = document.createElement('canvas')
+    this._bgLayer.width = this._fgLayer.width = this.size * this.dpr
+    this._bgLayer.height = this._fgLayer.height = this.size * this.dpr
+    this._bgCtx = this._bgLayer.getContext('2d')
+    this._fgCtx = this._fgLayer.getContext('2d')
+    this._bgCtx.scale(this.dpr, this.dpr)
+    this._fgCtx.scale(this.dpr, this.dpr)
+
+    // cache DOM state so unchanged readings are not written every frame
+    this._lastSpeed = null
+    this._lastGear = null
+    this._lastNitroPct = null
+    this._lastHeadlights = null
+    this._lastAbs = null
+    this._lastTcs = null
+    this._lastStm = null
+
     this._bind()
     this._draw(0)
   }
@@ -87,6 +110,7 @@ export class HUDManager {
   setVehicle(spec) {
     this.redline = spec.physics.redline
     this.maxRpm = Math.ceil((spec.physics.redline + 500) / 1000) * 1000
+    this._layersValid = false
     this._draw(this.needle)
   }
 
@@ -196,18 +220,48 @@ export class HUDManager {
     this.needle += (target - this.needle) * Math.min(1, dt * response)
     this._draw(this.needle)
 
-    this.el.speedReadout.textContent = Math.round(state.speedKmh)
-    this.el.gearDisplay.textContent = String(state.gear)
-    this.el.speedUnit.textContent = 'KM/H'
+    const speed = Math.round(state.speedKmh)
+    if (speed !== this._lastSpeed) {
+      this.el.speedReadout.textContent = speed
+      this._lastSpeed = speed
+    }
+
+    const gear = String(state.gear)
+    if (gear !== this._lastGear) {
+      this.el.gearDisplay.textContent = gear
+      this._lastGear = gear
+    }
 
     const pct = Math.round(state.nitro)
-    this.el.nitroFill.style.width = `${pct}%`
-    this.el.nitroPct.textContent = `${pct}%`
-    this.el.headlightIcon.classList.toggle('active', state.headlights)
+    if (pct !== this._lastNitroPct) {
+      this.el.nitroFill.style.width = `${pct}%`
+      this.el.nitroPct.textContent = `${pct}%`
+      this._lastNitroPct = pct
+    }
 
-    this.el.absLamp.classList.toggle('active', !!state.abs)
-    this.el.tcsLamp.classList.toggle('active', !!state.tcs)
-    this.el.stmLamp.classList.toggle('active', !!state.stm)
+    const headlights = !!state.headlights
+    if (headlights !== this._lastHeadlights) {
+      this.el.headlightIcon.classList.toggle('active', headlights)
+      this._lastHeadlights = headlights
+    }
+
+    const abs = !!state.abs
+    if (abs !== this._lastAbs) {
+      this.el.absLamp.classList.toggle('active', abs)
+      this._lastAbs = abs
+    }
+
+    const tcs = !!state.tcs
+    if (tcs !== this._lastTcs) {
+      this.el.tcsLamp.classList.toggle('active', tcs)
+      this._lastTcs = tcs
+    }
+
+    const stm = !!state.stm
+    if (stm !== this._lastStm) {
+      this.el.stmLamp.classList.toggle('active', stm)
+      this._lastStm = stm
+    }
   }
 
   _draw(needleFrac) {
@@ -216,37 +270,12 @@ export class HUDManager {
     const cx = W / 2
     const cy = W * 0.53
     const R = W * 0.385
-    const { startAngle, endAngle, sweep } = this
+    const { startAngle, sweep } = this
+
+    if (!this._layersValid) this._buildLayers()
 
     ctx.clearRect(0, 0, W, W)
-
-    /* ---- dark glass backing so the dial reads in daylight ---- */
-    const disc = ctx.createRadialGradient(cx, cy - 18, R * 0.15, cx, cy, R + 20)
-    disc.addColorStop(0, 'rgba(3,9,13,0.62)')
-    disc.addColorStop(0.72, 'rgba(3,9,13,0.44)')
-    disc.addColorStop(1, 'rgba(3,9,13,0)')
-    ctx.beginPath()
-    ctx.arc(cx, cy, R + 20, 0, Math.PI * 2)
-    ctx.fillStyle = disc
-    ctx.fill()
-
-    /* ---- soft outer halo ---- */
-    const halo = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, R + 24)
-    halo.addColorStop(0, 'rgba(0,229,255,0)')
-    halo.addColorStop(0.72, 'rgba(0,229,255,0.045)')
-    halo.addColorStop(1, 'rgba(0,229,255,0)')
-    ctx.beginPath()
-    ctx.arc(cx, cy, R + 24, 0, Math.PI * 2)
-    ctx.fillStyle = halo
-    ctx.fill()
-
-    /* ---- dial track ---- */
-    ctx.beginPath()
-    ctx.arc(cx, cy, R, startAngle, endAngle)
-    ctx.strokeStyle = 'rgba(170,210,225,0.13)'
-    ctx.lineWidth = 10
-    ctx.lineCap = 'round'
-    ctx.stroke()
+    ctx.drawImage(this._bgLayer, 0, 0, W, W)
 
     /* ---- rpm progress ---- */
     if (needleFrac > 0.002) {
@@ -254,62 +283,11 @@ export class HUDManager {
       ctx.arc(cx, cy, R, startAngle, startAngle + needleFrac * sweep)
       ctx.strokeStyle = 'rgba(235,255,255,0.28)'
       ctx.lineWidth = 10
+      ctx.lineCap = 'round'
       ctx.stroke()
     }
 
-    /* ---- redline sector ---- */
-    const redFrom = startAngle + (this.redline / this.maxRpm) * sweep
-    ctx.save()
-    ctx.beginPath()
-    ctx.arc(cx, cy, R, redFrom, endAngle)
-    ctx.strokeStyle = 'rgba(255,45,80,0.85)'
-    ctx.lineWidth = 10
-    ctx.lineCap = 'round'
-    ctx.shadowColor = 'rgba(255,45,80,0.9)'
-    ctx.shadowBlur = 14
-    ctx.stroke()
-    ctx.restore()
-
-    /* ---- ticks and numbers ---- */
-    // ticks are laid out by rpm value, not by equal spacing, so every number
-    // lines up with the needle and the redline sector
-    const tickStep = 200
-    const tickCount = Math.floor(this.maxRpm / tickStep)
-    // a 15000 rpm bike dial would crowd 16 numbers into one sweep, so only
-    // every other thousand gets a label above 12000 rpm
-    const labelStep = this.maxRpm >= 12000 ? 2000 : 1000
-    ctx.save()
-    ctx.shadowColor = 'rgba(0,0,0,0.9)'
-    ctx.shadowBlur = 4
-    for (let i = 0; i <= tickCount; i++) {
-      const rpmValue = i * tickStep
-      const labeled = rpmValue % labelStep === 0
-      const long = rpmValue % 1000 === 0
-      const a = startAngle + (rpmValue / this.maxRpm) * sweep
-      const hot = rpmValue >= this.redline
-      const r0 = R - (labeled ? 22 : long ? 16 : 12)
-      const r1 = R - 8
-
-      ctx.beginPath()
-      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0)
-      ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1)
-      ctx.strokeStyle = hot
-        ? (long ? 'rgba(255,120,145,0.95)' : 'rgba(255,90,120,0.6)')
-        : (long ? 'rgba(240,255,255,0.9)' : 'rgba(180,215,225,0.4)')
-      ctx.lineWidth = long ? 2 : 1
-      ctx.stroke()
-
-      if (labeled) {
-        const lx = cx + Math.cos(a) * (R - 40)
-        const ly = cy + Math.sin(a) * (R - 40)
-        ctx.fillStyle = hot ? 'rgba(255,130,150,0.95)' : 'rgba(235,250,255,0.88)'
-        ctx.font = '700 13px "Segoe UI", Arial, sans-serif'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(String(rpmValue / 1000), lx, ly)
-      }
-    }
-    ctx.restore()
+    ctx.drawImage(this._fgLayer, 0, 0, W, W)
 
     /* ---- needle ---- */
     const angle = startAngle + clamp(needleFrac, 0, 1) * sweep
@@ -345,5 +323,104 @@ export class HUDManager {
     ctx.font = '700 9px "Segoe UI", Arial, sans-serif'
     ctx.textAlign = 'center'
     ctx.fillText('RPM ×1000', cx, cy + R * 0.46)
+  }
+
+  /** Render the unchanging dial artwork into the two offscreen layers. */
+  _buildLayers() {
+    const W = this.size
+    const cx = W / 2
+    const cy = W * 0.53
+    const R = W * 0.385
+    const { startAngle, endAngle, sweep } = this
+
+    const bg = this._bgCtx
+    bg.clearRect(0, 0, W, W)
+
+    /* ---- dark glass backing so the dial reads in daylight ---- */
+    const disc = bg.createRadialGradient(cx, cy - 18, R * 0.15, cx, cy, R + 20)
+    disc.addColorStop(0, 'rgba(3,9,13,0.62)')
+    disc.addColorStop(0.72, 'rgba(3,9,13,0.44)')
+    disc.addColorStop(1, 'rgba(3,9,13,0)')
+    bg.beginPath()
+    bg.arc(cx, cy, R + 20, 0, Math.PI * 2)
+    bg.fillStyle = disc
+    bg.fill()
+
+    /* ---- soft outer halo ---- */
+    const halo = bg.createRadialGradient(cx, cy, R * 0.5, cx, cy, R + 24)
+    halo.addColorStop(0, 'rgba(0,229,255,0)')
+    halo.addColorStop(0.72, 'rgba(0,229,255,0.045)')
+    halo.addColorStop(1, 'rgba(0,229,255,0)')
+    bg.beginPath()
+    bg.arc(cx, cy, R + 24, 0, Math.PI * 2)
+    bg.fillStyle = halo
+    bg.fill()
+
+    /* ---- dial track ---- */
+    bg.beginPath()
+    bg.arc(cx, cy, R, startAngle, endAngle)
+    bg.strokeStyle = 'rgba(170,210,225,0.13)'
+    bg.lineWidth = 10
+    bg.lineCap = 'round'
+    bg.stroke()
+
+    const fg = this._fgCtx
+    fg.clearRect(0, 0, W, W)
+
+    /* ---- redline sector ---- */
+    const redFrom = startAngle + (this.redline / this.maxRpm) * sweep
+    fg.save()
+    fg.beginPath()
+    fg.arc(cx, cy, R, redFrom, endAngle)
+    fg.strokeStyle = 'rgba(255,45,80,0.85)'
+    fg.lineWidth = 10
+    fg.lineCap = 'round'
+    fg.shadowColor = 'rgba(255,45,80,0.9)'
+    fg.shadowBlur = 14
+    fg.stroke()
+    fg.restore()
+
+    /* ---- ticks and numbers ---- */
+    // ticks are laid out by rpm value, not by equal spacing, so every number
+    // lines up with the needle and the redline sector
+    const tickStep = 200
+    const tickCount = Math.floor(this.maxRpm / tickStep)
+    // a 15000 rpm bike dial would crowd 16 numbers into one sweep, so only
+    // every other thousand gets a label above 12000 rpm
+    const labelStep = this.maxRpm >= 12000 ? 2000 : 1000
+    fg.save()
+    fg.shadowColor = 'rgba(0,0,0,0.9)'
+    fg.shadowBlur = 4
+    for (let i = 0; i <= tickCount; i++) {
+      const rpmValue = i * tickStep
+      const labeled = rpmValue % labelStep === 0
+      const long = rpmValue % 1000 === 0
+      const a = startAngle + (rpmValue / this.maxRpm) * sweep
+      const hot = rpmValue >= this.redline
+      const r0 = R - (labeled ? 22 : long ? 16 : 12)
+      const r1 = R - 8
+
+      fg.beginPath()
+      fg.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0)
+      fg.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1)
+      fg.strokeStyle = hot
+        ? (long ? 'rgba(255,120,145,0.95)' : 'rgba(255,90,120,0.6)')
+        : (long ? 'rgba(240,255,255,0.9)' : 'rgba(180,215,225,0.4)')
+      fg.lineWidth = long ? 2 : 1
+      fg.stroke()
+
+      if (labeled) {
+        const lx = cx + Math.cos(a) * (R - 40)
+        const ly = cy + Math.sin(a) * (R - 40)
+        fg.fillStyle = hot ? 'rgba(255,130,150,0.95)' : 'rgba(235,250,255,0.88)'
+        fg.font = '700 13px "Segoe UI", Arial, sans-serif'
+        fg.textAlign = 'center'
+        fg.textBaseline = 'middle'
+        fg.fillText(String(rpmValue / 1000), lx, ly)
+      }
+    }
+    fg.restore()
+
+    this._layersValid = true
   }
 }

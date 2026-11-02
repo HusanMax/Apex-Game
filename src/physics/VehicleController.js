@@ -117,11 +117,30 @@ export class VehicleController {
     this.weightDistribution = { front: 0.5, rear: 0.5, left: 0.5, right: 0.5 }
     this.gForceVector = { lateral: 0, longitudinal: 0, vertical: 1 }
 
+    // reused every frame by the `state` getter so the loop does not allocate
+    this._state = {
+      speedKmh: 0, rpm: 0, gear: 1, nitro: 100, nitroActive: false,
+      headlights: true, abs: false, tcs: false, stm: false, slip: 0,
+      speedFactor: 0, currentSteerAngle: 0, steerAngleDegrees: 0,
+      weightDistribution: this.weightDistribution,
+      tireSlipRatio: 0, tireSlipAngle: { front: 0, rear: 0 },
+      isOversteering: false, isUndersteering: false,
+      gForceVector: this.gForceVector, brakePressure: 0,
+      absEnabled: true, shiftLock: 0
+    }
+
     this.camYaw = 0
     this.camLook = new THREE.Vector3(0, 1.2, -12)
     this.camDistance = 4.5
     // the rig's actual smoothed position (a spring, not a hard weld to the car)
     this.camPos = new THREE.Vector3(0, 2, 6)
+    // scratch vectors for the per-frame camera maths: allocating these inside
+    // update() produced a steady stream of garbage and periodic GC stutter
+    this._camLocal = new THREE.Vector3()
+    this._camDesired = new THREE.Vector3()
+    this._camLookTarget = new THREE.Vector3()
+    this._strideAxis = new THREE.Vector3(0, 1, 0)
+    this._strideQuat = new THREE.Quaternion()
     this._snapCamera = true
     this.shake = 0
     this._shakeT = 0
@@ -808,9 +827,9 @@ export class VehicleController {
     // speed, which combined with the spring lag left the car shrinking into
     // the distance.  The chase length now stays essentially fixed.
     const stretch = 1 + speedFactor * 0.04
-    const local = new THREE.Vector3(0, 1.95 + (dist - 4.5) * 0.14, dist * stretch)
-    local.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.camYaw)
-    const desired = new THREE.Vector3(this.X, 0, this.Z).add(local)
+    const local = this._camLocal.set(0, 1.95 + (dist - 4.5) * 0.14, dist * stretch)
+    local.applyQuaternion(this._strideQuat.setFromAxisAngle(this._strideAxis, this.camYaw))
+    const desired = this._camDesired.set(this.X, 0, this.Z).add(local)
     // the camera sags back on the throttle and noses in under braking
     desired.y -= clamp(this.smoothAccel * 0.0016, -0.05, 0.05)
 
@@ -847,7 +866,7 @@ export class VehicleController {
     // aim well past the nose: at speed the view looks down the road instead of
     // at the boot lid
     const lookDist = 8 + speedFactor * 12
-    const look = new THREE.Vector3(
+    const look = this._camLookTarget.set(
       this.X - Math.sin(this.psi) * lookDist,
       1.15,
       this.Z - Math.cos(this.psi) * lookDist
@@ -875,39 +894,43 @@ export class VehicleController {
 
     // speed/nitro FOV kick
     const targetFov = 60 + speedFactor * 3 + (this.nitroActive ? 2.5 : 0)
-    camera.fov += (targetFov - camera.fov) * ease(5)
-    camera.updateProjectionMatrix()
+    const nextFov = camera.fov + (targetFov - camera.fov) * ease(5)
+    if (Math.abs(nextFov - camera.fov) > 0.0005) {
+      camera.fov = nextFov
+      camera.updateProjectionMatrix()
+    }
   }
 
   get state() {
-    const speedKmh = Math.hypot(this.u, this.v) * 3.6
+    const s = this._state
+    const speed = Math.hypot(this.u, this.v)
+    s.speedKmh = speed * 3.6
+    s.rpm = this.rpm
     let gear = this.gear
     if (this.u < -0.5) gear = 'R'
     else if (Math.abs(this.u) < 0.35 && this.throttle < 0.05) gear = 'N'
-    return {
-      speedKmh,
-      rpm: this.rpm,
-      gear,
-      nitro: this.nitro,
-      nitroActive: this.nitroActive,
-      headlights: this.input.headlights,
-      abs: this.absActive,
-      tcs: this.tcsActive,
-      stm: this.stmActive,
-      slip: this.slip,
-      speedFactor: Math.min(Math.hypot(this.u, this.v) / 70, 1),
-      // telemetry for HUD / audio / visual effects
-      currentSteerAngle: this.steerAngle,
-      steerAngleDegrees: THREE.MathUtils.radToDeg(this.steerAngle),
-      weightDistribution: { ...this.weightDistribution },
-      tireSlipRatio: this.tireSlipRatio,
-      tireSlipAngle: { front: this.slipAngleF, rear: this.slipAngleR },
-      isOversteering: this.isOversteering,
-      isUndersteering: this.isUndersteering,
-      gForceVector: { ...this.gForceVector },
-      brakePressure: this.brakePressure,
-      absEnabled: this.absEnabled,
-      shiftLock: this.shiftLock
-    }
+    s.gear = gear
+    s.nitro = this.nitro
+    s.nitroActive = this.nitroActive
+    s.headlights = this.input.headlights
+    s.abs = this.absActive
+    s.tcs = this.tcsActive
+    s.stm = this.stmActive
+    s.slip = this.slip
+    s.speedFactor = Math.min(speed / 70, 1)
+    // telemetry for HUD / audio / visual effects
+    s.currentSteerAngle = this.steerAngle
+    s.steerAngleDegrees = THREE.MathUtils.radToDeg(this.steerAngle)
+    s.weightDistribution = this.weightDistribution
+    s.tireSlipRatio = this.tireSlipRatio
+    s.tireSlipAngle.front = this.slipAngleF
+    s.tireSlipAngle.rear = this.slipAngleR
+    s.isOversteering = this.isOversteering
+    s.isUndersteering = this.isUndersteering
+    s.gForceVector = this.gForceVector
+    s.brakePressure = this.brakePressure
+    s.absEnabled = this.absEnabled
+    s.shiftLock = this.shiftLock
+    return s
   }
 }

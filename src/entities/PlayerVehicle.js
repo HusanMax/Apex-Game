@@ -47,6 +47,7 @@ export class PlayerVehicle {
     this.procedural = null
     this._glbRoot = null
     this.dayMode = false
+    this._nitroColor = null
     this.onModelLoaded = null
     this.spec = null
 
@@ -135,6 +136,7 @@ export class PlayerVehicle {
     this.paintMaterials = []
     this.glassMaterials = []
     this.fillLight = null
+    this._nitroColor = null
   }
 
   _disposeTree(root) {
